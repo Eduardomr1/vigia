@@ -229,6 +229,50 @@ function isLiteral(node: ts.Node): boolean {
   );
 }
 
+/**
+ * Asserting that an expression equals itself checks nothing and conceals copy-paste typos.
+ * E.g., `expect(user.id).toBe(user.id)` or `expect(data.status).toEqual(data.status)`.
+ */
+export const identicalExpression: Rule = (context) => {
+  const findings: Finding[] = [];
+
+  walk(context.source, (node) => {
+    if (!ts.isCallExpression(node)) return;
+    if (!ts.isPropertyAccessExpression(node.expression)) return;
+
+    const matcher = node.expression.name.text;
+    if (matcher !== 'toBe' && matcher !== 'toEqual' && matcher !== 'toStrictEqual') return;
+
+    const receiver = node.expression.expression;
+    if (!ts.isCallExpression(receiver)) return;
+    if (calleeName(receiver.expression) !== 'expect') return;
+
+    const actual = receiver.arguments[0];
+    const expected = node.arguments[0];
+    if (!actual || !expected) return;
+
+    // Literals are handled by the 'tautology' rule
+    if (isLiteral(actual) && isLiteral(expected)) return;
+
+    const actualText = actual.getText(context.source).trim();
+    const expectedText = expected.getText(context.source).trim();
+    if (actualText !== expectedText) return;
+
+    findings.push(
+      finding(
+        context,
+        node,
+        'identical-expression',
+        'P1',
+        `expect(${actualText}).${matcher}(${expectedText}) compares an expression against itself.`,
+        'Compare the result against the expected outcome, not against the same expression.',
+      ),
+    );
+  });
+
+  return findings;
+};
+
 /** A skipped test protects nothing, and gets forgotten. */
 export const skippedTest: Rule = (context) => {
   const findings: Finding[] = [];
@@ -497,6 +541,7 @@ export const rules: readonly Rule[] = [
   noAssertion,
   expectWithoutMatcher,
   tautology,
+  identicalExpression,
   skippedTest,
   focusedTest,
   missingAwait,
