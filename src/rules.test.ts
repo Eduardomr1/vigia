@@ -3,6 +3,7 @@ import {
   assertionInCatch,
   expectWithoutMatcher,
   focusedTest,
+  identicalExpression,
   missingAwait,
   noAssertion,
   skippedTest,
@@ -524,6 +525,93 @@ describe('assertionInCatch', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0]?.rule).toBe('assertion-in-catch');
+  });
+});
+
+describe('identicalExpression', () => {
+  it('detects identical property access in toBe: expect(user.id).toBe(user.id)', () => {
+    const result = findings(
+      `it('checks user id', () => {
+         expect(user.id).toBe(user.id);
+       });`,
+      [identicalExpression],
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.rule).toBe('identical-expression');
+    expect(result[0]?.severity).toBe('P1');
+    expect(result[0]?.message).toContain('expect(user.id).toBe(user.id)');
+  });
+
+  it('detects identical nested property access in toEqual', () => {
+    const result = findings(
+      `it('checks data items', () => {
+         expect(response.data.items).toEqual(response.data.items);
+       });`,
+      [identicalExpression],
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.rule).toBe('identical-expression');
+  });
+
+  it('detects identical function call in assertion', () => {
+    const result = findings(
+      `it('checks calculation', () => {
+         expect(calculateTotal()).toStrictEqual(calculateTotal());
+       });`,
+      [identicalExpression],
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.rule).toBe('identical-expression');
+  });
+
+  it('detects identical variable assertion', () => {
+    const result = findings(
+      `it('checks variable', () => {
+         expect(actual).toBe(actual);
+       });`,
+      [identicalExpression],
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.rule).toBe('identical-expression');
+  });
+
+  it('ignores comparisons between different variables', () => {
+    expect(
+      findings(
+        `it('checks result', () => {
+           expect(actual).toBe(expected);
+         });`,
+        [identicalExpression],
+      ),
+    ).toEqual([]);
+  });
+
+  it('ignores comparisons between different properties of the same object', () => {
+    expect(
+      findings(
+        `it('checks parent', () => {
+           expect(user.id).toBe(user.parentId);
+         });`,
+        [identicalExpression],
+      ),
+    ).toEqual([]);
+  });
+
+  it('ignores literals (handled by tautology rule)', () => {
+    expect(
+      findings(
+        `it('checks literals', () => {
+           expect(1).toBe(1);
+           expect('abc').toEqual('abc');
+           expect(true).toBe(true);
+         });`,
+        [identicalExpression],
+      ),
+    ).toEqual([]);
   });
 });
 
