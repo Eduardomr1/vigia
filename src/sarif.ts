@@ -59,13 +59,14 @@ const RULE_DESCRIPTIONS: Record<string, string> = {
   'missing-await': 'Async assertion or function is missing await keyword.',
   'assertion-in-catch': 'Assertion inside catch block without rejection verification.',
   'orphan-negative-assertion': 'Negative assertion has no positive baseline assertion.',
+  'redundant-boolean-assertion': 'Assertion uses redundant boolean comparison instead of a direct matcher.',
 };
 
 /**
  * Transforms Vigía analysis findings into the OASIS SARIF v2.1.0 standard,
  * enabling seamless integration with GitHub Code Scanning alerts.
  */
-export function renderSarif(result: AnalysisResult, toolVersion = '1.5.0'): string {
+export function renderSarif(result: AnalysisResult, toolVersion = '1.6.0'): string {
   const rulesMap = new Map<string, SarifRule>();
 
   for (const f of result.findings) {
