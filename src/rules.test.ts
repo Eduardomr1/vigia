@@ -530,89 +530,376 @@ describe('assertionInCatch', () => {
 });
 
 describe('identicalExpression', () => {
-  it('detects identical property access in toBe: expect(user.id).toBe(user.id)', () => {
-    const result = findings(
-      `it('checks user id', () => {
-         expect(user.id).toBe(user.id);
-       });`,
-      [identicalExpression],
-    );
-
-    expect(result).toHaveLength(1);
-    expect(result[0]?.rule).toBe('identical-expression');
-    expect(result[0]?.severity).toBe('P1');
-    expect(result[0]?.message).toContain('expect(user.id).toBe(user.id)');
-  });
-
-  it('detects identical nested property access in toEqual', () => {
-    const result = findings(
-      `it('checks data items', () => {
-         expect(response.data.items).toEqual(response.data.items);
-       });`,
-      [identicalExpression],
-    );
-
-    expect(result).toHaveLength(1);
-    expect(result[0]?.rule).toBe('identical-expression');
-  });
-
-  it('detects identical function call in assertion', () => {
-    const result = findings(
-      `it('checks calculation', () => {
-         expect(calculateTotal()).toStrictEqual(calculateTotal());
-       });`,
-      [identicalExpression],
-    );
-
-    expect(result).toHaveLength(1);
-    expect(result[0]?.rule).toBe('identical-expression');
-  });
-
-  it('detects identical variable assertion', () => {
-    const result = findings(
-      `it('checks variable', () => {
-         expect(actual).toBe(actual);
-       });`,
-      [identicalExpression],
-    );
-
-    expect(result).toHaveLength(1);
-    expect(result[0]?.rule).toBe('identical-expression');
-  });
-
-  it('ignores comparisons between different variables', () => {
-    expect(
-      findings(
-        `it('checks result', () => {
-           expect(actual).toBe(expected);
+  describe('positive cases & copy-paste error hints', () => {
+    it('detects identical property access in toBe: expect(user.id).toBe(user.id)', () => {
+      const result = findings(
+        `it('checks user id', () => {
+           expect(user.id).toBe(user.id);
          });`,
         [identicalExpression],
-      ),
-    ).toEqual([]);
-  });
+      );
 
-  it('ignores comparisons between different properties of the same object', () => {
-    expect(
-      findings(
-        `it('checks parent', () => {
-           expect(user.id).toBe(user.parentId);
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('identical-expression');
+      expect(result[0]?.severity).toBe('P1');
+      expect(result[0]?.message).toContain('expect(user.id).toBe(user.id)');
+      expect(result[0]?.message).toContain('copy-paste error');
+      expect(result[0]?.hint).toContain('expect(user.id).toBe(expectedId)');
+      expect(result[0]?.hint).toContain('expect(user.id).toBe(expectedUser.id)');
+    });
+
+    it('detects identical variable assertion with autofix suggestion: expect(data).toEqual(data)', () => {
+      const result = findings(
+        `it('checks data', () => {
+           expect(data).toEqual(data);
          });`,
         [identicalExpression],
-      ),
-    ).toEqual([]);
-  });
+      );
 
-  it('ignores literals (handled by tautology rule)', () => {
-    expect(
-      findings(
-        `it('checks literals', () => {
-           expect(1).toBe(1);
-           expect('abc').toEqual('abc');
-           expect(true).toBe(true);
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('identical-expression');
+      expect(result[0]?.severity).toBe('P1');
+      expect(result[0]?.message).toContain('expect(data).toEqual(data)');
+      expect(result[0]?.message).toContain('copy-paste error');
+      expect(result[0]?.hint).toContain('expect(data).toEqual(expectedData)');
+    });
+
+    it('detects identical property on data: expect(data.status).toEqual(data.status)', () => {
+      const result = findings(
+        `it('checks status', () => {
+           expect(data.status).toEqual(data.status);
          });`,
         [identicalExpression],
-      ),
-    ).toEqual([]);
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(data.status).toEqual(expectedStatus)');
+    });
+
+    it('detects identical nested property access in toEqual', () => {
+      const result = findings(
+        `it('checks data items', () => {
+           expect(response.data.items).toEqual(response.data.items);
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('identical-expression');
+      expect(result[0]?.hint).toContain('expectedItems');
+    });
+
+    it('detects identical function call in assertion', () => {
+      const result = findings(
+        `it('checks calculation', () => {
+           expect(calculateTotal()).toStrictEqual(calculateTotal());
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('identical-expression');
+      expect(result[0]?.hint).toContain('expect(calculateTotal()).toStrictEqual(expectedTotal)');
+      expect(result[0]?.hint).toContain("instead of invoking 'calculateTotal()' on both sides");
+    });
+
+    it('detects getter function calls: expect(getUser(123)).toEqual(getUser(123))', () => {
+      const result = findings(
+        `it('checks user fetch', () => {
+           expect(getUser(123)).toEqual(getUser(123));
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(getUser(123)).toEqual(expectedUser)');
+    });
+
+    it('detects identical variable assertion with actual identifier', () => {
+      const result = findings(
+        `it('checks variable', () => {
+           expect(actual).toBe(actual);
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('identical-expression');
+      expect(result[0]?.hint).toContain('expect(actual).toBe(expected)');
+    });
+
+    it('detects identifier with actual prefix and suggests expected prefix', () => {
+      const result = findings(
+        `it('checks user', () => {
+           expect(actualUser).toEqual(actualUser);
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actualUser).toEqual(expectedUser)');
+    });
+
+    it('detects property access on object with actual prefix', () => {
+      const result = findings(
+        `it('checks name', () => {
+           expect(actualUser.name).toBe(actualUser.name);
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actualUser.name).toBe(expectedUser.name)');
+    });
+
+    it('detects identical array element indexing: expect(items[0]).toBe(items[0])', () => {
+      const result = findings(
+        `it('checks item', () => {
+           expect(items[0]).toBe(items[0]);
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('identical-expression');
+      expect(result[0]?.hint).toContain('expect(items[0]).toBe(expectedItem)');
+    });
+
+    it('detects element access on array with actual prefix', () => {
+      const result = findings(
+        `it('checks element', () => {
+           expect(actualRows[0]).toEqual(actualRows[0]);
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actualRows[0]).toEqual(expectedRows[0])');
+    });
+
+    it('detects identical binary expression: expect(a + b).toBe(a + b)', () => {
+      const result = findings(
+        `it('checks sum', () => {
+           expect(a + b).toBe(a + b);
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(a + b).toBe(expectedResult)');
+      expect(result[0]?.hint).toContain('instead of evaluating');
+    });
+
+    it('handles parenthesized expressions: expect((user.id)).toBe(user.id)', () => {
+      const result = findings(
+        `it('checks paren left', () => {
+           expect((user.id)).toBe(user.id);
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('identical-expression');
+    });
+
+    it('handles parenthesized expected expression: expect(user.id).toBe((user.id))', () => {
+      const result = findings(
+        `it('checks paren right', () => {
+           expect(user.id).toBe((user.id));
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('identical-expression');
+    });
+
+    it('handles multiline formatted identical expressions', () => {
+      const result = findings(
+        `it('checks multiline', () => {
+           expect(user.id).toBe(
+             user.id
+           );
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('identical-expression');
+    });
+
+    it('detects async assertion with .resolves: await expect(fetchData()).resolves.toEqual(fetchData())', () => {
+      const result = findings(
+        `it('checks async resolves', async () => {
+           await expect(fetchData()).resolves.toEqual(fetchData());
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.message).toContain('expect(fetchData()).resolves.toEqual(fetchData())');
+      expect(result[0]?.hint).toContain('expect(fetchData()).resolves.toEqual(expectedData)');
+    });
+
+    it('detects async assertion with .rejects: await expect(loadUser()).rejects.toBe(loadUser())', () => {
+      const result = findings(
+        `it('checks async rejects', async () => {
+           await expect(loadUser()).rejects.toBe(loadUser());
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.message).toContain('expect(loadUser()).rejects.toBe(loadUser())');
+    });
+
+    it('detects Chai assert.equal with copy-paste error explanation and hint', () => {
+      const result = findings(
+        `it('checks chai equal', () => {
+           assert.equal(user.id, user.id);
+         });`,
+        [identicalExpression],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.message).toContain('assert.equal(user.id, user.id) compares an expression against itself: likely a copy-paste error.');
+      expect(result[0]?.hint).toContain('assert.equal(user.id, expectedId)');
+    });
+
+    it('detects Chai assert.deepEqual and assert.strictEqual', () => {
+      const r1 = findings(
+        `it('checks chai deepEqual', () => {
+           assert.deepEqual(response.body, response.body);
+         });`,
+        [identicalExpression],
+      );
+      expect(r1).toHaveLength(1);
+      expect(r1[0]?.message).toContain('assert.deepEqual(response.body, response.body)');
+
+      const r2 = findings(
+        `it('checks chai strictEqual', () => {
+           assert.strictEqual(data, data);
+         });`,
+        [identicalExpression],
+      );
+      expect(r2).toHaveLength(1);
+      expect(r2[0]?.hint).toContain('assert.strictEqual(data, expectedData)');
+    });
+  });
+
+  describe('false positives (valid assertions that should not be flagged)', () => {
+    it('ignores comparisons between different variables', () => {
+      expect(
+        findings(
+          `it('checks result', () => {
+             expect(actual).toBe(expected);
+             expect(result).toEqual(expectedResult);
+           });`,
+          [identicalExpression],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores comparisons between different properties of the same object', () => {
+      expect(
+        findings(
+          `it('checks parent', () => {
+             expect(user.id).toBe(user.parentId);
+             expect(data.created).not.toBe(data.updated);
+           });`,
+          [identicalExpression],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores comparisons between the same property on different objects', () => {
+      expect(
+        findings(
+          `it('checks users', () => {
+             expect(user1.id).toBe(user2.id);
+             expect(actualUser.name).toEqual(expectedUser.name);
+           });`,
+          [identicalExpression],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores comparisons between different array indices', () => {
+      expect(
+        findings(
+          `it('checks array indices', () => {
+             expect(items[0]).toBe(items[1]);
+             expect(matrix[0][1]).toBe(matrix[1][0]);
+           });`,
+          [identicalExpression],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores comparisons between different function arguments or different functions', () => {
+      expect(
+        findings(
+          `it('checks function calls', () => {
+             expect(getUser(1)).toEqual(getUser(2));
+             expect(calculateTotal(cartA)).toBe(calculateTotal(cartB));
+             expect(getActual()).toBe(getExpected());
+           });`,
+          [identicalExpression],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores comparisons between expressions and literals', () => {
+      expect(
+        findings(
+          `it('checks literals', () => {
+             expect(user.id).toBe(42);
+             expect(data.status).toBe('success');
+             expect(items.length).toBe(3);
+             expect(isValid).toBe(true);
+           });`,
+          [identicalExpression],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores literals (handled by tautology rule)', () => {
+      expect(
+        findings(
+          `it('checks literals', () => {
+             expect(1).toBe(1);
+             expect('abc').toEqual('abc');
+             expect(true).toBe(true);
+             expect(null).toBe(null);
+           });`,
+          [identicalExpression],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores negated comparisons of different values', () => {
+      expect(
+        findings(
+          `it('checks negated', () => {
+             expect(user.id).not.toBe(expectedId);
+           });`,
+          [identicalExpression],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores valid Chai assertions', () => {
+      expect(
+        findings(
+          `it('checks chai valid', () => {
+             assert.equal(user.id, expectedId);
+             assert.strictEqual(actual, expected);
+             assert.deepEqual(user, { name: 'Alice' });
+           });`,
+          [identicalExpression],
+        ),
+      ).toEqual([]);
+    });
   });
 });
 
