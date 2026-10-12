@@ -537,6 +537,311 @@ function hasFailureGuard(tryBlock: ts.Block): boolean {
   return found;
 }
 
+const PLAYWRIGHT_BOOLEAN_METHODS: Record<string, string> = {
+  isVisible: 'toBeVisible',
+  isHidden: 'toBeHidden',
+  isEnabled: 'toBeEnabled',
+  isDisabled: 'toBeDisabled',
+  isChecked: 'toBeChecked',
+  isEditable: 'toBeEditable',
+};
+
+interface ParsedBooleanAssertion {
+  readonly expectCall: ts.CallExpression;
+  readonly actual: ts.Expression;
+  readonly matcher: string;
+  readonly hasNot: boolean;
+  readonly isPositive: boolean;
+}
+
+function parseBooleanAssertion(node: ts.CallExpression): ParsedBooleanAssertion | null {
+  if (!ts.isPropertyAccessExpression(node.expression)) return null;
+
+  const matcher = node.expression.name.text;
+  let hasNot = false;
+  let target: ts.Expression = node.expression.expression;
+
+  if (ts.isPropertyAccessExpression(target) && target.name.text === 'not') {
+    hasNot = true;
+    target = target.expression;
+  }
+
+  if (!ts.isCallExpression(target)) return null;
+  if (calleeName(target.expression) !== 'expect') return null;
+
+  const expectCall = target;
+  let actual = expectCall.arguments[0];
+  if (!actual) return null;
+
+  while (ts.isParenthesizedExpression(actual)) {
+    actual = actual.expression;
+  }
+
+  let isPositive: boolean;
+  if (matcher === 'toBe' || matcher === 'toEqual' || matcher === 'toStrictEqual') {
+    if (node.arguments.length === 0) return null;
+    const arg = node.arguments[0];
+    if (!arg) return null;
+    if (arg.kind === ts.SyntaxKind.TrueKeyword) {
+      isPositive = true;
+    } else if (arg.kind === ts.SyntaxKind.FalseKeyword) {
+      isPositive = false;
+    } else {
+      return null;
+    }
+  } else if (matcher === 'toBeTruthy') {
+    isPositive = true;
+  } else if (matcher === 'toBeFalsy') {
+    isPositive = false;
+  } else {
+    return null;
+  }
+
+  return { expectCall, actual, matcher, hasNot, isPositive };
+}
+
+interface AssertionSuggestion {
+  readonly suggestedFix?: string;
+  readonly customHint?: string;
+}
+
+function getBooleanAssertionSuggestion(
+  expr: ts.Expression,
+  targetBool: boolean,
+  source: ts.SourceFile,
+): AssertionSuggestion | null {
+  let actual = expr;
+  while (ts.isParenthesizedExpression(actual)) {
+    actual = actual.expression;
+  }
+
+  if (ts.isBinaryExpression(actual)) {
+    const op = actual.operatorToken.kind;
+    let left = actual.left;
+    let right = actual.right;
+
+    while (ts.isParenthesizedExpression(left)) left = left.expression;
+    while (ts.isParenthesizedExpression(right)) right = right.expression;
+
+    const leftText = left.getText(source).trim();
+    const rightText = right.getText(source).trim();
+
+    if (op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.EqualsEqualsToken) {
+      if (right.kind === ts.SyntaxKind.TrueKeyword) {
+        return targetBool
+          ? { suggestedFix: `expect(${leftText}).toBe(true)` }
+          : { suggestedFix: `expect(${leftText}).not.toBe(true)` };
+      }
+      if (right.kind === ts.SyntaxKind.FalseKeyword) {
+        return targetBool
+          ? { suggestedFix: `expect(${leftText}).toBe(false)` }
+          : { suggestedFix: `expect(${leftText}).not.toBe(false)` };
+      }
+      if (left.kind === ts.SyntaxKind.TrueKeyword) {
+        return targetBool
+          ? { suggestedFix: `expect(${rightText}).toBe(true)` }
+          : { suggestedFix: `expect(${rightText}).not.toBe(true)` };
+      }
+      if (left.kind === ts.SyntaxKind.FalseKeyword) {
+        return targetBool
+          ? { suggestedFix: `expect(${rightText}).toBe(false)` }
+          : { suggestedFix: `expect(${rightText}).not.toBe(false)` };
+      }
+
+      if (op === ts.SyntaxKind.EqualsEqualsEqualsToken) {
+        return targetBool
+          ? { suggestedFix: `expect(${leftText}).toBe(${rightText})` }
+          : { suggestedFix: `expect(${leftText}).not.toBe(${rightText})` };
+      } else {
+        return targetBool
+          ? { suggestedFix: `expect(${leftText}).toEqual(${rightText})` }
+          : { suggestedFix: `expect(${leftText}).not.toEqual(${rightText})` };
+      }
+    }
+
+    if (op === ts.SyntaxKind.ExclamationEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken) {
+      if (right.kind === ts.SyntaxKind.TrueKeyword) {
+        return targetBool
+          ? { suggestedFix: `expect(${leftText}).not.toBe(true)` }
+          : { suggestedFix: `expect(${leftText}).toBe(true)` };
+      }
+      if (right.kind === ts.SyntaxKind.FalseKeyword) {
+        return targetBool
+          ? { suggestedFix: `expect(${leftText}).not.toBe(false)` }
+          : { suggestedFix: `expect(${leftText}).toBe(false)` };
+      }
+
+      if (op === ts.SyntaxKind.ExclamationEqualsEqualsToken) {
+        return targetBool
+          ? { suggestedFix: `expect(${leftText}).not.toBe(${rightText})` }
+          : { suggestedFix: `expect(${leftText}).toBe(${rightText})` };
+      } else {
+        return targetBool
+          ? { suggestedFix: `expect(${leftText}).not.toEqual(${rightText})` }
+          : { suggestedFix: `expect(${leftText}).toEqual(${rightText})` };
+      }
+    }
+
+    if (op === ts.SyntaxKind.GreaterThanToken) {
+      return targetBool
+        ? { suggestedFix: `expect(${leftText}).toBeGreaterThan(${rightText})` }
+        : { suggestedFix: `expect(${leftText}).toBeLessThanOrEqual(${rightText})` };
+    }
+
+    if (op === ts.SyntaxKind.GreaterThanEqualsToken) {
+      return targetBool
+        ? { suggestedFix: `expect(${leftText}).toBeGreaterThanOrEqual(${rightText})` }
+        : { suggestedFix: `expect(${leftText}).toBeLessThan(${rightText})` };
+    }
+
+    if (op === ts.SyntaxKind.LessThanToken) {
+      return targetBool
+        ? { suggestedFix: `expect(${leftText}).toBeLessThan(${rightText})` }
+        : { suggestedFix: `expect(${leftText}).toBeGreaterThanOrEqual(${rightText})` };
+    }
+
+    if (op === ts.SyntaxKind.LessThanEqualsToken) {
+      return targetBool
+        ? { suggestedFix: `expect(${leftText}).toBeLessThanOrEqual(${rightText})` }
+        : { suggestedFix: `expect(${leftText}).toBeGreaterThan(${rightText})` };
+    }
+
+    if (op === ts.SyntaxKind.InstanceOfKeyword) {
+      return targetBool
+        ? { suggestedFix: `expect(${leftText}).toBeInstanceOf(${rightText})` }
+        : { suggestedFix: `expect(${leftText}).not.toBeInstanceOf(${rightText})` };
+    }
+
+    if (op === ts.SyntaxKind.InKeyword) {
+      return targetBool
+        ? { suggestedFix: `expect(${rightText}).toHaveProperty(${leftText})` }
+        : { suggestedFix: `expect(${rightText}).not.toHaveProperty(${leftText})` };
+    }
+
+    if (op === ts.SyntaxKind.AmpersandAmpersandToken) {
+      return {
+        customHint: `Split into separate assertions: expect(${leftText}).toBeTruthy() and expect(${rightText}).toBeTruthy() for clearer diagnostics.`,
+      };
+    }
+
+    if (op === ts.SyntaxKind.BarBarToken) {
+      return {
+        customHint: `Avoid logical OR in assertions; assert on specific expected outcomes instead.`,
+      };
+    }
+
+    return null;
+  }
+
+  if (ts.isCallExpression(actual)) {
+    if (
+      ts.isPropertyAccessExpression(actual.expression) &&
+      actual.expression.name.text === 'includes' &&
+      actual.arguments.length >= 1
+    ) {
+      const objText = actual.expression.expression.getText(source).trim();
+      const argText = actual.arguments[0]!.getText(source).trim();
+      return targetBool
+        ? { suggestedFix: `expect(${objText}).toContain(${argText})` }
+        : { suggestedFix: `expect(${objText}).not.toContain(${argText})` };
+    }
+
+    if (
+      ts.isIdentifier(actual.expression) &&
+      actual.expression.text === 'Boolean' &&
+      actual.arguments.length === 1
+    ) {
+      const argText = actual.arguments[0]!.getText(source).trim();
+      return targetBool
+        ? { suggestedFix: `expect(${argText}).toBeTruthy()` }
+        : { suggestedFix: `expect(${argText}).toBeFalsy()` };
+    }
+
+    if (ts.isPropertyAccessExpression(actual.expression)) {
+      const methodName = actual.expression.name.text;
+      const pwMatcher = PLAYWRIGHT_BOOLEAN_METHODS[methodName];
+      if (pwMatcher) {
+        const locText = actual.expression.expression.getText(source).trim();
+        return targetBool
+          ? { suggestedFix: `await expect(${locText}).${pwMatcher}()` }
+          : { suggestedFix: `await expect(${locText}).not.${pwMatcher}()` };
+      }
+    }
+  }
+
+  if (ts.isAwaitExpression(actual) && ts.isCallExpression(actual.expression)) {
+    const call = actual.expression;
+    if (ts.isPropertyAccessExpression(call.expression)) {
+      const methodName = call.expression.name.text;
+      const pwMatcher = PLAYWRIGHT_BOOLEAN_METHODS[methodName];
+      if (pwMatcher) {
+        const locText = call.expression.expression.getText(source).trim();
+        return targetBool
+          ? { suggestedFix: `await expect(${locText}).${pwMatcher}()` }
+          : { suggestedFix: `await expect(${locText}).not.${pwMatcher}()` };
+      }
+    }
+  }
+
+  if (
+    ts.isPrefixUnaryExpression(actual) &&
+    actual.operator === ts.SyntaxKind.ExclamationToken
+  ) {
+    let inner: ts.Expression = actual.operand;
+    while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+
+    const innerSuggestion = getBooleanAssertionSuggestion(inner, !targetBool, source);
+    if (innerSuggestion) return innerSuggestion;
+
+    const innerText = inner.getText(source).trim();
+    return targetBool
+      ? { suggestedFix: `expect(${innerText}).toBe(false)` }
+      : { suggestedFix: `expect(${innerText}).toBe(true)` };
+  }
+
+  return null;
+}
+
+/**
+ * Asserting boolean conditions with `.toBe(true)`, `.toBeTruthy()`, etc.,
+ * conceals the actual values and prevents useful failure diffs.
+ * E.g., `expect(a === b).toBe(true)` instead of `expect(a).toBe(b)`.
+ */
+export const redundantBooleanAssertion: Rule = (context) => {
+  const findings: Finding[] = [];
+
+  walk(context.source, (node) => {
+    if (!ts.isCallExpression(node)) return;
+
+    const parsed = parseBooleanAssertion(node);
+    if (!parsed) return;
+
+    const { actual, hasNot, isPositive } = parsed;
+    const targetBool = hasNot ? !isPositive : isPositive;
+
+    const suggestion = getBooleanAssertionSuggestion(actual, targetBool, context.source);
+    if (!suggestion) return;
+
+    const nodeText = node.getText(context.source).replace(/\s+/g, ' ').trim();
+    const hint =
+      suggestion.customHint ??
+      `Use ${suggestion.suggestedFix} instead for clearer failure diffs and semantic assertions.`;
+
+    findings.push(
+      finding(
+        context,
+        node,
+        'redundant-boolean-assertion',
+        'P2',
+        `Redundant boolean assertion: ${nodeText}.`,
+        hint,
+      ),
+    );
+  });
+
+  return findings;
+};
+
 export const rules: readonly Rule[] = [
   noAssertion,
   expectWithoutMatcher,
@@ -546,4 +851,5 @@ export const rules: readonly Rule[] = [
   focusedTest,
   missingAwait,
   assertionInCatch,
+  redundantBooleanAssertion,
 ];

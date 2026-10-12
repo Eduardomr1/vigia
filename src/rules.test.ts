@@ -6,6 +6,7 @@ import {
   identicalExpression,
   missingAwait,
   noAssertion,
+  redundantBooleanAssertion,
   skippedTest,
   tautology,
 } from './rules';
@@ -614,4 +615,386 @@ describe('identicalExpression', () => {
     ).toEqual([]);
   });
 });
+
+describe('redundantBooleanAssertion', () => {
+  describe('positive cases', () => {
+    it('detects expect(a === b).toBe(true) and suggests expect(a).toBe(b)', () => {
+      const result = findings(
+        `it('checks equality', () => {
+           expect(actual === expected).toBe(true);
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('redundant-boolean-assertion');
+      expect(result[0]?.severity).toBe('P2');
+      expect(result[0]?.message).toBe('Redundant boolean assertion: expect(actual === expected).toBe(true).');
+      expect(result[0]?.hint).toContain('expect(actual).toBe(expected)');
+    });
+
+    it('detects expect(a !== b).toBe(true) and suggests expect(a).not.toBe(b)', () => {
+      const result = findings(
+        `it('checks inequality', () => {
+           expect(actual !== expected).toBe(true);
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('redundant-boolean-assertion');
+      expect(result[0]?.severity).toBe('P2');
+      expect(result[0]?.hint).toContain('expect(actual).not.toBe(expected)');
+    });
+
+    it('detects expect(a === b).toBe(false) and suggests expect(a).not.toBe(b)', () => {
+      const result = findings(
+        `it('checks equality to false', () => {
+           expect(actual === expected).toBe(false);
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actual).not.toBe(expected)');
+    });
+
+    it('detects expect(a !== b).toBe(false) and suggests expect(a).toBe(b)', () => {
+      const result = findings(
+        `it('checks inequality to false', () => {
+           expect(actual !== expected).toBe(false);
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actual).toBe(expected)');
+    });
+
+    it('detects expect(a == b).toBe(true) and suggests expect(a).toEqual(b)', () => {
+      const result = findings(
+        `it('checks loose equality', () => {
+           expect(actual == expected).toBe(true);
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actual).toEqual(expected)');
+    });
+
+    it('detects expect(a != b).toBe(true) and suggests expect(a).not.toEqual(b)', () => {
+      const result = findings(
+        `it('checks loose inequality', () => {
+           expect(actual != expected).toBe(true);
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actual).not.toEqual(expected)');
+    });
+
+    it('detects expect(condicion).toBeTruthy() with binary equality', () => {
+      const result = findings(
+        `it('checks truthy comparison', () => {
+           expect(status === 200).toBeTruthy();
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(status).toBe(200)');
+    });
+
+    it('detects expect(condicion).toBeTruthy() with inequality', () => {
+      const result = findings(
+        `it('checks truthy inequality', () => {
+           expect(user.role !== 'guest').toBeTruthy();
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain("expect(user.role).not.toBe('guest')");
+    });
+
+    it('detects expect(a === b).toBeFalsy() and suggests expect(a).not.toBe(b)', () => {
+      const result = findings(
+        `it('checks falsy equality', () => {
+           expect(actual === expected).toBeFalsy();
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actual).not.toBe(expected)');
+    });
+
+    it('detects expect(a !== b).toBeFalsy() and suggests expect(a).toBe(b)', () => {
+      const result = findings(
+        `it('checks falsy inequality', () => {
+           expect(actual !== expected).toBeFalsy();
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actual).toBe(expected)');
+    });
+
+    it('detects expect(a === b).toEqual(true)', () => {
+      const result = findings(
+        `it('checks toEqual(true)', () => {
+           expect(actual === expected).toEqual(true);
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actual).toBe(expected)');
+    });
+
+    it('detects expect(a === b).toStrictEqual(true)', () => {
+      const result = findings(
+        `it('checks toStrictEqual(true)', () => {
+           expect(actual === expected).toStrictEqual(true);
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actual).toBe(expected)');
+    });
+
+    it('detects expect(a === b).not.toBe(true) and suggests expect(a).not.toBe(b)', () => {
+      const result = findings(
+        `it('checks not.toBe(true)', () => {
+           expect(actual === expected).not.toBe(true);
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actual).not.toBe(expected)');
+    });
+
+    it('detects expect(a === b).not.toBeTruthy() and suggests expect(a).not.toBe(b)', () => {
+      const result = findings(
+        `it('checks not.toBeTruthy()', () => {
+           expect(actual === expected).not.toBeTruthy();
+         });`,
+        [redundantBooleanAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(actual).not.toBe(expected)');
+    });
+
+    it('detects relational comparisons: >, >=, <, <=', () => {
+      const r1 = findings(`it('gt', () => { expect(count > 0).toBe(true); });`, [redundantBooleanAssertion]);
+      expect(r1[0]?.hint).toContain('expect(count).toBeGreaterThan(0)');
+
+      const r2 = findings(`it('gte', () => { expect(count >= 10).toBe(true); });`, [redundantBooleanAssertion]);
+      expect(r2[0]?.hint).toContain('expect(count).toBeGreaterThanOrEqual(10)');
+
+      const r3 = findings(`it('lt', () => { expect(count < 5).toBe(true); });`, [redundantBooleanAssertion]);
+      expect(r3[0]?.hint).toContain('expect(count).toBeLessThan(5)');
+
+      const r4 = findings(`it('lte', () => { expect(count <= 100).toBe(true); });`, [redundantBooleanAssertion]);
+      expect(r4[0]?.hint).toContain('expect(count).toBeLessThanOrEqual(100)');
+
+      const r5 = findings(`it('gt truthy', () => { expect(total > 0).toBeTruthy(); });`, [redundantBooleanAssertion]);
+      expect(r5[0]?.hint).toContain('expect(total).toBeGreaterThan(0)');
+    });
+
+    it('detects array/string .includes() calls', () => {
+      const r1 = findings(
+        `it('includes', () => { expect(items.includes('admin')).toBe(true); });`,
+        [redundantBooleanAssertion],
+      );
+      expect(r1[0]?.hint).toContain("expect(items).toContain('admin')");
+
+      const r2 = findings(
+        `it('includes false', () => { expect(items.includes('guest')).toBe(false); });`,
+        [redundantBooleanAssertion],
+      );
+      expect(r2[0]?.hint).toContain("expect(items).not.toContain('guest')");
+    });
+
+    it('detects logical negation !cond', () => {
+      const r1 = findings(
+        `it('negated', () => { expect(!user.isActive).toBe(true); });`,
+        [redundantBooleanAssertion],
+      );
+      expect(r1[0]?.hint).toContain('expect(user.isActive).toBe(false)');
+
+      const r2 = findings(
+        `it('negated truthy', () => { expect(!hasPermission).toBeTruthy(); });`,
+        [redundantBooleanAssertion],
+      );
+      expect(r2[0]?.hint).toContain('expect(hasPermission).toBe(false)');
+    });
+
+    it('detects Playwright locator boolean checks', () => {
+      const r1 = findings(
+        `it('locator isVisible', async () => {
+           expect(await page.locator('.btn').isVisible()).toBe(true);
+         });`,
+        [redundantBooleanAssertion],
+      );
+      expect(r1[0]?.hint).toContain("await expect(page.locator('.btn')).toBeVisible()");
+
+      const r2 = findings(
+        `it('locator isEnabled', async () => {
+           expect(await submitButton.isEnabled()).toBe(true);
+         });`,
+        [redundantBooleanAssertion],
+      );
+      expect(r2[0]?.hint).toContain('await expect(submitButton).toBeEnabled()');
+    });
+
+    it('detects instanceof and in operators', () => {
+      const r1 = findings(
+        `it('instanceof', () => { expect(err instanceof CustomError).toBe(true); });`,
+        [redundantBooleanAssertion],
+      );
+      expect(r1[0]?.hint).toContain('expect(err).toBeInstanceOf(CustomError)');
+
+      const r2 = findings(
+        `it('in', () => { expect('id' in user).toBe(true); });`,
+        [redundantBooleanAssertion],
+      );
+      expect(r2[0]?.hint).toContain("expect(user).toHaveProperty('id')");
+    });
+
+    it('detects logical operators && and || with appropriate advice', () => {
+      const r1 = findings(
+        `it('and', () => { expect(isLoaded && isValid).toBe(true); });`,
+        [redundantBooleanAssertion],
+      );
+      expect(r1[0]?.hint).toContain('Split into separate assertions');
+
+      const r2 = findings(
+        `it('or', () => { expect(isAdmin || isOwner).toBe(true); });`,
+        [redundantBooleanAssertion],
+      );
+      expect(r2[0]?.hint).toContain('Avoid logical OR in assertions');
+    });
+
+    it('handles parenthesized comparisons correctly', () => {
+      const result = findings(
+        `it('parenthesized', () => { expect((a === b)).toBe(true); });`,
+        [redundantBooleanAssertion],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.hint).toContain('expect(a).toBe(b)');
+    });
+
+    it('simplifies comparison against boolean literals', () => {
+      const r1 = findings(
+        `it('flag true', () => { expect(flag === true).toBe(true); });`,
+        [redundantBooleanAssertion],
+      );
+      expect(r1[0]?.hint).toContain('expect(flag).toBe(true)');
+
+      const r2 = findings(
+        `it('flag false', () => { expect(flag === false).toBe(true); });`,
+        [redundantBooleanAssertion],
+      );
+      expect(r2[0]?.hint).toContain('expect(flag).toBe(false)');
+    });
+  });
+
+  describe('false positives (valid assertions that should not be flagged)', () => {
+    it('accepts semantic direct assertions', () => {
+      expect(
+        findings(
+          `it('valid', () => {
+             expect(actual).toBe(expected);
+             expect(actual).not.toBe(expected);
+             expect(items).toEqual(['a', 'b']);
+           });`,
+          [redundantBooleanAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts checking a boolean variable or property directly with .toBe(true)', () => {
+      expect(
+        findings(
+          `it('valid boolean', () => {
+             expect(isValid).toBe(true);
+             expect(user.isActive).toBe(true);
+             expect(status.hasFinished).toBe(false);
+           });`,
+          [redundantBooleanAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts checking an object or value directly with .toBeTruthy() or .toBeFalsy()', () => {
+      expect(
+        findings(
+          `it('valid truthy/falsy', () => {
+             expect(user).toBeTruthy();
+             expect(response.data).toBeTruthy();
+             expect(error).toBeFalsy();
+             expect(nullValue).toBeFalsy();
+           });`,
+          [redundantBooleanAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts custom boolean returning functions with .toBe(true)', () => {
+      expect(
+        findings(
+          `it('valid function call', () => {
+             expect(isTestFile(file)).toBe(true);
+             expect(checkAccess(token)).toBe(false);
+           });`,
+          [redundantBooleanAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores expect without matcher (handled by expectWithoutMatcher)', () => {
+      expect(
+        findings(
+          `it('no matcher', () => {
+             expect(a === b);
+           });`,
+          [redundantBooleanAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores tautology literals (handled by tautology rule)', () => {
+      expect(
+        findings(
+          `it('tautology', () => {
+             expect(true).toBe(true);
+             expect(false).toBe(false);
+           });`,
+          [redundantBooleanAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores numerical or non-boolean assertions', () => {
+      expect(
+        findings(
+          `it('number compare', () => {
+             expect(items.length).toBe(3);
+             expect(calculateTotal()).toBe(42);
+             expect(compare(a, b)).toBe(0);
+           });`,
+          [redundantBooleanAssertion],
+        ),
+      ).toEqual([]);
+    });
+  });
+});
+
 

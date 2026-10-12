@@ -41,7 +41,7 @@ Real output from `node dist/cli.js ejemplo` against the fixture in this repo —
 
 ## What it detects
 
-Nine checks, all built on the same idea: a test that can't fail is worse than no test, because it occupies the place of one that would.
+Ten checks, all built on the same idea: a test that can't fail is worse than no test, because it occupies the place of one that would.
 
 | Rule | Severity | Example |
 |---|---|---|
@@ -49,13 +49,78 @@ Nine checks, all built on the same idea: a test that can't fail is worse than no
 | **`expect()` without a matcher** | P1 | `expect(result)` with no `.toBe(...)` chained after it |
 | **Tautology** | P1 | `expect(true).toBe(true)`, comparing a literal to itself |
 | **Identical expression** | P1 | `expect(user.id).toBe(user.id)`, comparing an expression to itself |
+| **Redundant boolean assertion** | P2 | `expect(a === b).toBe(true)` — hides diffs; should be `expect(a).toBe(b)` |
 | **Missing `await`** | P1 | `expect(promise).rejects.toThrow()` with no `await` — the test ends before the promise settles |
 | **Assertion in `catch`** | P1 | `try { await op(); } catch (e) { expect(e)... }` without a failure guard in `try` — passes silently if `op()` never throws |
 | **Focused test (`.only`)** | P1 | `it.only(...)` silently skips the rest of the suite in CI |
 | **Skipped test** | P3 | `it.skip` / `xit` left behind past its reason for existing |
 | **Orphan negative assertion** | P1 / P2 | `queryByTestId('x')` expected to be null/absent, but `"x"` never appears anywhere in the source — the assertion can't fail because the thing it denies doesn't exist |
 
-The first eight run on any Jest or Vitest test file, with native support for Cypress (`.should()`, `.and()`), Chai (`assert.*`) and Playwright's async locator matchers (`toBeVisible`, `toHaveText`, etc. — every Playwright assertion is a promise, so a missing `await` is invisible on the page but silent in the suite). The ninth needs `--src` pointed at your source root, and also reads Maestro YAML flows for the same defect in E2E specs.
+The first nine run on any Jest or Vitest test file, with native support for Cypress (`.should()`, `.and()`), Chai (`assert.*`) and Playwright's async locator matchers (`toBeVisible`, `toHaveText`, etc. — every Playwright assertion is a promise, so a missing `await` is invisible on the page but silent in the suite). The tenth needs `--src` pointed at your source root, and also reads Maestro YAML flows for the same defect in E2E specs.
+
+---
+
+## Architecture & AST Pipeline
+
+> 📖 **Deep-Dive Specification:** See [docs/arquitectura/README.md](../docs/arquitectura/README.md) and [docs/arquitectura/vigia-ast-pipeline.md](../docs/arquitectura/vigia-ast-pipeline.md) for full static analysis and SARIF export details.
+
+```mermaid
+flowchart LR
+    subgraph Trigger["1. Input & Context"]
+        PR["Pull Request / Git Diff<br/>(changed-only: true)"]
+        CLI["CLI Command<br/>vigia [path] --source [dir]"]
+        Files["Test Files<br/>*.spec.ts, *.test.js, *.yaml"]
+    end
+
+    subgraph AST_Parser["2. Syntax Parsing (AST)"]
+        TSCompiler["TypeScript Compiler API<br/>ts.createSourceFile()"]
+        AST["Abstract Syntax Tree (AST)<br/>SourceFile ➔ Block ➔ CallExpressions"]
+        OrphanCollector["Identifier Collector<br/>collectKnownIds(sourceRoot)"]
+    end
+
+    subgraph Rule_Engine["3. Semantic Rule Matcher (rules.ts)"]
+        direction TB
+        Matcher["analyzeSource() - Rule Matcher"]
+        
+        R1["no-assertion (P1)<br/>Test body without assertion"]
+        R2["expect-without-matcher (P1)<br/>Orphan expect(x) call"]
+        R3["tautology (P1)<br/>Literal tautology: true === true"]
+        R4["identical-expression (P1)<br/>Identical expression comparison"]
+        R5["missing-await (P1)<br/>Missing await on async assertion"]
+        R6["assertion-in-catch (P1)<br/>Assertion in catch without try guard"]
+        R7["focused-test (P1)<br/>Committed .only / fit()"]
+        R8["skipped-test (P3)<br/>Abandoned .skip / xit()"]
+        R9["orphan-negative-assertion (P1/P2)<br/>queryByTestId('id') absent in codebase"]
+        
+        Matcher --- R1 & R2 & R3
+        Matcher --- R4 & R5 & R6
+        Matcher --- R7 & R8 & R9
+    end
+
+    subgraph Formatting["4. Normalization"]
+        Findings["Normalized Findings<br/>{ ruleId, severity, line, col }"]
+    end
+
+    subgraph Outputs["5. Multi-Target Reporting"]
+        StdOut["Terminal CLI<br/>(ANSI styled console)"]
+        PRComment["GitHub PR Comment<br/>(Markdown sticky comment)"]
+        SARIF["OASIS SARIF v2.1.0<br/>(sarif.ts)"]
+        CodeScan["GitHub Code Scanning<br/>(Repository Security Alerts)"]
+    end
+
+    PR --> Files
+    CLI --> Files
+    Files --> TSCompiler
+    CLI -.->|"If --source supplied"| OrphanCollector
+    TSCompiler --> AST
+    AST --> Matcher
+    OrphanCollector -.->|"TestIDs Harvested"| R9
+    Matcher --> Findings
+    Findings --> StdOut
+    Findings --> PRComment
+    Findings --> SARIF
+    SARIF --> CodeScan
+```
 
 ---
 
