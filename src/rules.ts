@@ -229,6 +229,196 @@ function isLiteral(node: ts.Node): boolean {
   );
 }
 
+function capitalize(str: string): string {
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function singularize(str: string): string {
+  if (str.endsWith('ies')) return str.slice(0, -3) + 'y';
+  if (str.endsWith('ses')) return str.slice(0, -2);
+  if (str.endsWith('s') && !str.endsWith('ss')) return str.slice(0, -1);
+  return str;
+}
+
+interface ParsedIdenticalAssertion {
+  readonly actual: ts.Expression;
+  readonly expected: ts.Expression;
+  readonly matcher: string;
+  readonly asyncModifier?: string | undefined;
+  readonly isChaiAssert?: boolean | undefined;
+}
+
+function parseIdenticalAssertion(node: ts.CallExpression): ParsedIdenticalAssertion | null {
+  // Pattern 1: expect(actual).toBe(expected) or expect(actual).resolves.toBe(expected)
+  if (ts.isPropertyAccessExpression(node.expression)) {
+    const matcher = node.expression.name.text;
+    if (matcher === 'toBe' || matcher === 'toEqual' || matcher === 'toStrictEqual') {
+      let receiver: ts.Expression = node.expression.expression;
+      let asyncModifier: string | undefined;
+
+      if (
+        ts.isPropertyAccessExpression(receiver) &&
+        (receiver.name.text === 'resolves' || receiver.name.text === 'rejects')
+      ) {
+        asyncModifier = receiver.name.text;
+        receiver = receiver.expression;
+      }
+
+      if (ts.isCallExpression(receiver) && calleeName(receiver.expression) === 'expect') {
+        const actual = receiver.arguments[0];
+        const expected = node.arguments[0];
+        if (actual && expected) {
+          return { actual, expected, matcher, asyncModifier, isChaiAssert: false };
+        }
+      }
+    }
+  }
+
+  // Pattern 2: Chai assert.equal(actual, expected) / assert.strictEqual / assert.deepEqual
+  if (
+    ts.isPropertyAccessExpression(node.expression) &&
+    ts.isIdentifier(node.expression.expression) &&
+    node.expression.expression.text === 'assert'
+  ) {
+    const matcher = node.expression.name.text;
+    if (matcher === 'equal' || matcher === 'strictEqual' || matcher === 'deepEqual') {
+      const actual = node.arguments[0];
+      const expected = node.arguments[1];
+      if (actual && expected) {
+        return { actual, expected, matcher, isChaiAssert: true };
+      }
+    }
+  }
+
+  return null;
+}
+
+function getIdenticalExpressionHint(
+  actualNode: ts.Expression,
+  matcher: string,
+  source: ts.SourceFile,
+  asyncModifier?: string,
+  isChaiAssert?: boolean,
+): string {
+  const actualText = actualNode.getText(source).replace(/\s+/g, ' ').trim();
+  const formatFix = (replacement: string) => {
+    if (isChaiAssert) {
+      return `assert.${matcher}(${actualText}, ${replacement})`;
+    }
+    const prefix = asyncModifier
+      ? `expect(${actualText}).${asyncModifier}`
+      : `expect(${actualText})`;
+    return `${prefix}.${matcher}(${replacement})`;
+  };
+
+  // 1. PropertyAccessExpression (e.g., user.id, data.status, response.data.items, actualUser.id)
+  if (ts.isPropertyAccessExpression(actualNode)) {
+    const propName = actualNode.name.text;
+    const objExpr = actualNode.expression;
+    const objText = objExpr.getText(source).replace(/\s+/g, ' ').trim();
+
+    // If the object name starts or ends with 'actual' (e.g. actualUser.id or actual.id)
+    if (objText.startsWith('actual') || objText.endsWith('Actual')) {
+      let suggestedObj = objText;
+      if (objText === 'actual') {
+        suggestedObj = 'expected';
+      } else if (objText.startsWith('actual')) {
+        suggestedObj = 'expected' + objText.slice(6);
+      } else if (objText.endsWith('Actual')) {
+        suggestedObj = objText.slice(0, -6) + 'Expected';
+      }
+      const fix = formatFix(`${suggestedObj}.${propName}`);
+      return `Likely copy-paste error. Replace '${actualText}' with '${suggestedObj}.${propName}' (e.g. ${fix}) instead of comparing '${actualText}' with itself.`;
+    }
+
+    // Standard property access: user.id -> suggest expectedId or expectedUser.id
+    const capitalizedProp = capitalize(propName);
+    const shortExpected = `expected${capitalizedProp}`;
+    const baseObj = objText.split('.').pop() || '';
+    const objExpected = baseObj ? `expected${capitalize(baseObj)}.${propName}` : '';
+
+    const fix1 = formatFix(shortExpected);
+    const fix2 = objExpected ? formatFix(objExpected) : '';
+    const examples = fix2 ? `${fix1} or ${fix2}` : fix1;
+
+    return `Likely copy-paste error. Replace '${actualText}' with the expected value (e.g. ${examples}) instead of comparing '${actualText}' with itself.`;
+  }
+
+  // 2. Identifier (e.g., data, user, actualData, actual, total)
+  if (ts.isIdentifier(actualNode)) {
+    const name = actualNode.text;
+    let suggestedVar = '';
+
+    if (name === 'actual') {
+      suggestedVar = 'expected';
+    } else if (name.startsWith('actual') && name.length > 6) {
+      suggestedVar = 'expected' + name.slice(6);
+    } else if (name.endsWith('Actual')) {
+      suggestedVar = name.slice(0, -6) + 'Expected';
+    } else {
+      suggestedVar = `expected${capitalize(name)}`;
+    }
+
+    const fix = formatFix(suggestedVar);
+    return `Likely copy-paste error. Replace '${actualText}' with the expected outcome (e.g. ${fix} or a fixture/literal) instead of comparing '${actualText}' with itself.`;
+  }
+
+  // 3. CallExpression (e.g., calculateTotal(), getUser(1), service.getData())
+  if (ts.isCallExpression(actualNode)) {
+    const callee = actualNode.expression;
+    let baseName = 'Result';
+
+    if (ts.isIdentifier(callee)) {
+      baseName = callee.text;
+    } else if (ts.isPropertyAccessExpression(callee)) {
+      baseName = callee.name.text;
+    }
+
+    for (const prefix of ['get', 'calculate', 'compute', 'fetch', 'find', 'create', 'build', 'load']) {
+      if (baseName.startsWith(prefix) && baseName.length > prefix.length) {
+        baseName = baseName.slice(prefix.length);
+        break;
+      }
+    }
+
+    const suggestedVar = `expected${capitalize(baseName)}`;
+    const fix = formatFix(suggestedVar);
+    return `Likely copy-paste error. Replace '${actualText}' with the expected result (e.g. ${fix}) instead of invoking '${actualText}' on both sides.`;
+  }
+
+  // 4. ElementAccessExpression (e.g., items[0], list[i])
+  if (ts.isElementAccessExpression(actualNode)) {
+    const objText = actualNode.expression.getText(source).replace(/\s+/g, ' ').trim();
+    const argText = actualNode.argumentExpression
+      ? actualNode.argumentExpression.getText(source).replace(/\s+/g, ' ').trim()
+      : '0';
+
+    if (objText.startsWith('actual')) {
+      const suggestedObj = objText === 'actual' ? 'expected' : 'expected' + objText.slice(6);
+      const fix = formatFix(`${suggestedObj}[${argText}]`);
+      return `Likely copy-paste error. Replace '${actualText}' with '${suggestedObj}[${argText}]' (e.g. ${fix}) instead of comparing '${actualText}' with itself.`;
+    }
+
+    const baseName = objText.split('.').pop() || 'items';
+    const singularName = singularize(baseName);
+    const fix1 = formatFix(`expected${capitalize(singularName)}`);
+    const fix2 = formatFix(`expected${capitalize(baseName)}[${argText}]`);
+
+    return `Likely copy-paste error. Replace '${actualText}' with the expected element (e.g. ${fix1} or ${fix2}) instead of comparing '${actualText}' with itself.`;
+  }
+
+  // 5. BinaryExpression (e.g., a + b)
+  if (ts.isBinaryExpression(actualNode)) {
+    const fix = formatFix('expectedResult');
+    return `Likely copy-paste error. Replace '${actualText}' with the expected calculation result (e.g. ${fix}) instead of evaluating '${actualText}' on both sides.`;
+  }
+
+  // 6. Generic fallback
+  const fix = formatFix('expectedValue');
+  return `Likely copy-paste error. Replace '${actualText}' with the expected outcome (e.g. ${fix}) instead of comparing '${actualText}' with itself.`;
+}
+
 /**
  * Asserting that an expression equals itself checks nothing and conceals copy-paste typos.
  * E.g., `expect(user.id).toBe(user.id)` or `expect(data.status).toEqual(data.status)`.
@@ -238,25 +428,43 @@ export const identicalExpression: Rule = (context) => {
 
   walk(context.source, (node) => {
     if (!ts.isCallExpression(node)) return;
-    if (!ts.isPropertyAccessExpression(node.expression)) return;
 
-    const matcher = node.expression.name.text;
-    if (matcher !== 'toBe' && matcher !== 'toEqual' && matcher !== 'toStrictEqual') return;
+    const parsed = parseIdenticalAssertion(node);
+    if (!parsed) return;
 
-    const receiver = node.expression.expression;
-    if (!ts.isCallExpression(receiver)) return;
-    if (calleeName(receiver.expression) !== 'expect') return;
+    const { actual, expected, matcher, asyncModifier, isChaiAssert } = parsed;
 
-    const actual = receiver.arguments[0];
-    const expected = node.arguments[0];
-    if (!actual || !expected) return;
+    let actualCleanNode = actual;
+    while (ts.isParenthesizedExpression(actualCleanNode)) {
+      actualCleanNode = actualCleanNode.expression;
+    }
+
+    let expectedCleanNode = expected;
+    while (ts.isParenthesizedExpression(expectedCleanNode)) {
+      expectedCleanNode = expectedCleanNode.expression;
+    }
 
     // Literals are handled by the 'tautology' rule
-    if (isLiteral(actual) && isLiteral(expected)) return;
+    if (isLiteral(actualCleanNode) && isLiteral(expectedCleanNode)) return;
 
-    const actualText = actual.getText(context.source).trim();
-    const expectedText = expected.getText(context.source).trim();
-    if (actualText !== expectedText) return;
+    const actualCleanText = actualCleanNode.getText(context.source).replace(/\s+/g, ' ').trim();
+    const expectedCleanText = expectedCleanNode.getText(context.source).replace(/\s+/g, ' ').trim();
+    if (actualCleanText !== expectedCleanText) return;
+
+    const fullAssertion = isChaiAssert
+      ? `assert.${matcher}(${actualCleanText}, ${expectedCleanText})`
+      : asyncModifier
+      ? `expect(${actualCleanText}).${asyncModifier}.${matcher}(${expectedCleanText})`
+      : `expect(${actualCleanText}).${matcher}(${expectedCleanText})`;
+
+    const message = `${fullAssertion} compares an expression against itself: likely a copy-paste error.`;
+    const hint = getIdenticalExpressionHint(
+      actualCleanNode,
+      matcher,
+      context.source,
+      asyncModifier,
+      isChaiAssert,
+    );
 
     findings.push(
       finding(
@@ -264,8 +472,8 @@ export const identicalExpression: Rule = (context) => {
         node,
         'identical-expression',
         'P1',
-        `expect(${actualText}).${matcher}(${expectedText}) compares an expression against itself.`,
-        'Compare the result against the expected outcome, not against the same expression.',
+        message,
+        hint,
       ),
     );
   });
