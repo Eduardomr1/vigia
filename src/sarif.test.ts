@@ -248,6 +248,53 @@ describe('renderSarif - OASIS SARIF v2.1.0 compliance', () => {
     expect(region?.startColumn).toBe(1);
     expect(validateSarifCompliance(parsed).valid).toBe(true);
   });
+
+  it('includes dedicated SARIF rule descriptions for timer, vacuous, and duplicate-title rules', () => {
+    const result: AnalysisResult = {
+      filesAnalyzed: 3,
+      findings: [
+        {
+          rule: 'floating-timer-assertion',
+          severity: 'P1',
+          file: 'tests/timers.test.ts',
+          line: 4,
+          column: 5,
+          message: 'Assertion inside setTimeout() callback.',
+          hint: 'Advance fake timers.',
+        },
+        {
+          rule: 'vacuous-assertion',
+          severity: 'P1',
+          file: 'tests/vacuous.test.ts',
+          line: 9,
+          column: 5,
+          message: 'Vacuous assertion: expect({}).toBeTruthy().',
+          hint: 'Assert on runtime state.',
+        },
+        {
+          rule: 'duplicate-test-title',
+          severity: 'P2',
+          file: 'tests/titles.test.ts',
+          line: 15,
+          column: 3,
+          message: 'Duplicate test title "handles login".',
+          hint: 'Use unique titles.',
+        },
+      ],
+    };
+
+    const parsed = JSON.parse(renderSarif(result, '1.6.0')) as SarifLog;
+    expect(validateSarifCompliance(parsed).valid).toBe(true);
+
+    const driverRules = parsed.runs[0]?.tool.driver.rules ?? [];
+    expect(driverRules).toHaveLength(3);
+    for (const rule of driverRules) {
+      expect(rule.shortDescription.text).not.toContain('Test quality rule:');
+    }
+    expect(driverRules.find((r) => r.id === 'duplicate-test-title')?.defaultConfiguration.level).toBe(
+      'warning',
+    );
+  });
 });
 
 describe('validateSarifCompliance', () => {

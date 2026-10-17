@@ -1,6 +1,7 @@
 import { analyzeSource } from './analyze';
 import {
   assertionInCatch,
+  duplicateTestTitle,
   expectWithoutMatcher,
   floatingTimerAssertion,
   focusedTest,
@@ -1640,6 +1641,119 @@ describe('vacuousAssertion', () => {
     });
   });
 });
+
+describe('duplicateTestTitle', () => {
+  describe('positive cases', () => {
+    it('detects duplicate it() titles within the same describe block', () => {
+      const result = findings(
+        `describe('cart', () => {
+           it('calculates total', () => { expect(total(1, 2)).toBe(3); });
+           it('applies discount', () => { expect(discount(10)).toBe(8); });
+           it('calculates total', () => { expect(total(2, 3)).toBe(5); });
+         });`,
+        [duplicateTestTitle],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('duplicate-test-title');
+      expect(result[0]?.severity).toBe('P2');
+      expect(result[0]?.line).toBe(4);
+      expect(result[0]?.message).toContain('"calculates total"');
+      expect(result[0]?.message).toContain('first defined on line 2');
+    });
+
+    it('detects collision between it() and test() sharing a title in top-level scope', () => {
+      const result = findings(
+        `it('authenticates user', () => { expect(login()).toBe(true); });
+         test('authenticates user', () => { expect(relogin()).toBe(true); });`,
+        [duplicateTestTitle],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.line).toBe(2);
+      expect(result[0]?.message).toContain('first defined on line 1');
+    });
+
+    it('detects duplicate describe() suite titles in the same parent scope', () => {
+      const result = findings(
+        `describe('payments', () => {
+           it('charges card', () => { expect(charge()).toBe('ok'); });
+         });
+         describe('payments', () => {
+           it('refunds card', () => { expect(refund()).toBe('ok'); });
+         });`,
+        [duplicateTestTitle],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('duplicate-test-title');
+      expect(result[0]?.severity).toBe('P2');
+      expect(result[0]?.line).toBe(4);
+      expect(result[0]?.message).toContain('Duplicate suite title "payments"');
+    });
+
+    it('detects duplicate it.each template titles in the same suite', () => {
+      const result = findings(
+        `describe('validators', () => {
+           it.each(['a', 'b'])('accepts %s', (v) => { expect(isValid(v)).toBe(true); });
+           it.each(['c', 'd'])('accepts %s', (v) => { expect(isValid(v)).toBe(true); });
+         });`,
+        [duplicateTestTitle],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.line).toBe(3);
+    });
+  });
+
+  describe('safe patterns (no false positives)', () => {
+    it('allows identical test titles in distinct sibling or nested describe blocks', () => {
+      expect(
+        findings(
+          `describe('API', () => {
+             describe('GET /orders', () => {
+               it('returns 200', () => { expect(getStatus()).toBe(200); });
+             });
+             describe('POST /orders', () => {
+               it('returns 200', () => { expect(postStatus()).toBe(200); });
+             });
+           });`,
+          [duplicateTestTitle],
+        ),
+      ).toEqual([]);
+    });
+
+    it('does not collide suite title with a nested test of the same name', () => {
+      expect(
+        findings(
+          `describe('parseArgs', () => {
+             it('parseArgs', () => { expect(parseArgs([])).toBeDefined(); });
+           });`,
+          [duplicateTestTitle],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores dynamic interpolated template titles and mutually exclusive if/else branches', () => {
+      expect(
+        findings(
+          `describe('platform behavior', () => {
+             for (const id of [1, 2]) {
+               it(\`processes item \${id}\`, () => { expect(processItem(id)).toBe(true); });
+             }
+             if (process.platform === 'win32') {
+               it('normalizes separators', () => { expect(norm('a\\\\b')).toBe('a/b'); });
+             } else {
+               it('normalizes separators', () => { expect(norm('a/b')).toBe('a/b'); });
+             }
+           });`,
+          [duplicateTestTitle],
+        ),
+      ).toEqual([]);
+    });
+  });
+});
+
 
 
 
