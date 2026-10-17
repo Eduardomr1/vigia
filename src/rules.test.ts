@@ -10,6 +10,7 @@ import {
   redundantBooleanAssertion,
   skippedTest,
   tautology,
+  vacuousAssertion,
 } from './rules';
 
 function findings(code: string, rule: Parameters<typeof analyzeSource>[2]) {
@@ -1527,6 +1528,119 @@ describe('floatingTimerAssertion', () => {
     });
   });
 });
+
+describe('vacuousAssertion', () => {
+  describe('positive cases', () => {
+    it.each([
+      `expect({}).toBeTruthy()`,
+      `expect({ ok: false }).toBeDefined()`,
+      `expect([]).toBeTruthy()`,
+      `expect([1, 2]).not.toBeNull()`,
+      `expect(() => validateOrder()).toBeTruthy()`,
+      `expect(function () { return null; }).not.toBeUndefined()`,
+      `expect(typeof response.body).toBeTruthy()`,
+      `expect(typeof missingVar).not.toBeUndefined()`,
+      `expect(\`order-\${orderId}\`).toBeTruthy()`,
+      `expect(\`\${maybeEmpty}\`).toBeDefined()`,
+      `expect('ready').toBeTruthy()`,
+      `expect(42).not.toBeFalsy()`,
+      `expect(/^[a-z]+$/).toBeTruthy()`,
+      `expect(false).toBeDefined()`,
+      `expect(0).not.toBeNull()`,
+      `expect('').not.toBeUndefined()`,
+      `expect(({ nested: true })).toBeTruthy()`,
+    ])('detects vacuous Jest/Vitest assertion: %s', (assertionExpr) => {
+      const result = findings(
+        `it('always passes by construction', () => {
+           ${assertionExpr};
+         });`,
+        [vacuousAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('vacuous-assertion');
+      expect(result[0]?.severity).toBe('P1');
+      expect(result[0]?.message).toContain(assertionExpr);
+      expect(result[0]?.hint).toContain('guaranteed-truthy');
+    });
+
+    it.each([
+      `assert.isOk({})`,
+      `assert.isDefined([])`,
+      `assert.isNotNull(() => compute())`,
+      `assert.exists('constant')`,
+    ])('detects vacuous Chai assertion: %s', (chaiExpr) => {
+      const result = findings(
+        `it('always passes in Chai', () => {
+           ${chaiExpr};
+         });`,
+        [vacuousAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('vacuous-assertion');
+      expect(result[0]?.severity).toBe('P1');
+    });
+  });
+
+  describe('safe patterns (no false positives)', () => {
+    it('accepts truthiness and existence checks on runtime variables and calls', () => {
+      expect(
+        findings(
+          `it('checks runtime state', () => {
+             expect(result).toBeTruthy();
+             expect(createSession()).toBeDefined();
+             expect(user.token).not.toBeNull();
+             expect(items[0]).not.toBeUndefined();
+             assert.isOk(response);
+             assert.isDefined(config.apiKey);
+           });`,
+          [vacuousAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts pure dynamic template literal checked for truthiness', () => {
+      expect(
+        findings(
+          `it('can fail when dynamic variable is empty string', () => {
+             expect(\`\${dynamicToken}\`).toBeTruthy();
+           });`,
+          [vacuousAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('does not flag falsy primitives checked for truthiness (they fail at runtime)', () => {
+      expect(
+        findings(
+          `it('fails rather than passing vacuously', () => {
+             expect(false).toBeTruthy();
+             expect(0).toBeTruthy();
+             expect('').toBeTruthy();
+             expect(0).not.toBeFalsy();
+           });`,
+          [vacuousAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts structural matchers and throw assertions on literals and callbacks', () => {
+      expect(
+        findings(
+          `it('uses structural or exception matchers', () => {
+             expect({}).toEqual({});
+             expect([]).toHaveLength(0);
+             expect(() => parsePayload('')).toThrow();
+             expect(typeof value).toBe('string');
+           });`,
+          [vacuousAssertion],
+        ),
+      ).toEqual([]);
+    });
+  });
+});
+
 
 
 
