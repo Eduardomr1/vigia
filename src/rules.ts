@@ -557,13 +557,15 @@ export const missingAwait: Rule = (context) => {
     const asyncExpect = findAsyncExpect(node.expression, playwright);
     if (asyncExpect === null) return;
 
+    const subject = asyncExpect === 'poll' ? 'expect.poll(...)' : `expect(...).${asyncExpect}`;
+
     findings.push(
       finding(
         context,
         node,
         'missing-await',
         'P1',
-        `expect(...).${asyncExpect} with no await: the test ends before checking anything.`,
+        `${subject} with no await: the test ends before checking anything.`,
         'Add await, or return the expression.',
       ),
     );
@@ -608,6 +610,7 @@ const PLAYWRIGHT_MATCHERS = new Set([
   'toHaveTitle',
   'toHaveURL',
   'toBeOK',
+  'toPass',
 ]);
 
 /** Does the file import Playwright? Only then are its matchers asynchronous. */
@@ -621,32 +624,61 @@ function usesPlaywright(source: ts.SourceFile): boolean {
 }
 
 /**
- * Returns the async modifier (`resolves` / `rejects`) of an expression that
- * starts at `expect(...)`, or null if it isn't that shape.
+ * Returns the async modifier (`resolves`, `rejects`, `poll`, or Playwright
+ * async matcher) of an expression that starts at `expect(...)`, or null if it
+ * isn't that shape.
  *
  * Only the bare expression is inspected: if the node were `await ...` or
  * `return ...`, it wouldn't be an ExpressionStatement with this shape.
  */
 function findAsyncExpect(expression: ts.Expression, playwright: boolean): string | null {
+  if (!ts.isCallExpression(expression)) return null;
+
   let current: ts.Node = expression;
   let modifier: string | null = null;
+  let sawChainedCall = false;
 
   // Walked from the chain back to its root: expect(x).rejects.toThrow()
   while (ts.isCallExpression(current) || ts.isPropertyAccessExpression(current)) {
     if (ts.isPropertyAccessExpression(current)) {
       const name = current.name.text;
-      if (ASYNC_MODIFIERS.has(name)) modifier = name;
-      else if (playwright && modifier === null && PLAYWRIGHT_MATCHERS.has(name)) {
+      if (ASYNC_MODIFIERS.has(name)) {
+        modifier = name;
+      } else if (
+        name === 'poll' &&
+        sawChainedCall &&
+        ts.isIdentifier(current.expression) &&
+        current.expression.text === 'expect'
+      ) {
+        // expect.poll(() => ...).toBe(...) returns a Promise in both Vitest and Playwright.
+        modifier = 'poll';
+      } else if (name === 'toPass' && modifier === null && hasCallbackExpectReceiver(current.expression)) {
+        // expect(async () => { ... }).toPass() always returns a Promise even via custom fixtures.
+        modifier = 'toPass';
+      } else if (playwright && modifier === null && PLAYWRIGHT_MATCHERS.has(name)) {
         modifier = name;
       }
       current = current.expression;
     } else {
+      if (current !== expression) {
+        sawChainedCall = true;
+      }
       current = current.expression;
     }
   }
 
   if (modifier === null) return null;
   return ts.isIdentifier(current) && current.text === 'expect' ? modifier : null;
+}
+
+function hasCallbackExpectReceiver(receiver: ts.Expression): boolean {
+  let target: ts.Expression = receiver;
+  if (ts.isPropertyAccessExpression(target) && target.name.text === 'not') {
+    target = target.expression;
+  }
+  if (!ts.isCallExpression(target)) return false;
+  const arg = target.arguments[0];
+  return Boolean(arg && (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)));
 }
 
 /**
