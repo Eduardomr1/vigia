@@ -1,7 +1,22 @@
 export { analyzeFiles, analyzeSource, collectTestFiles, isTestFile } from './analyze';
 export { countBySeverity, renderReport } from './report';
 export { renderSarif, validateSarifCompliance } from './sarif';
-export { rules } from './rules';
+export {
+  assertionInCatch,
+  duplicateTestTitle,
+  expectWithoutMatcher,
+  floatingTimerAssertion,
+  focusedTest,
+  identicalExpression,
+  missingAwait,
+  noAssertion,
+  redundantBooleanAssertion,
+  rules,
+  skippedTest,
+  tautology,
+  vacuousAssertion,
+} from './rules';
+export type { Rule, RuleContext } from './rules';
 export type { AnalysisResult, Finding, Severity } from './types';
 export type {
   SarifLog,

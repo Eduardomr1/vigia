@@ -68,6 +68,9 @@ const RULE_DESCRIPTIONS: Record<string, string> = {
   'assertion-in-catch': 'Assertion inside catch block without rejection verification.',
   'orphan-negative-assertion': 'Negative assertion has no positive baseline assertion.',
   'redundant-boolean-assertion': 'Assertion uses redundant boolean comparison instead of a direct matcher.',
+  'floating-timer-assertion': 'Assertion inside an unawaited timer callback executes after the test finishes.',
+  'vacuous-assertion': 'Assertion checks truthiness or existence on an expression guaranteed truthy by construction.',
+  'duplicate-test-title': 'Multiple tests or suites share an identical title within the same lexical scope.',
 };
 
 /**

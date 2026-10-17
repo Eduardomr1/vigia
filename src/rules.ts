@@ -1422,6 +1422,108 @@ export const vacuousAssertion: Rule = (context) => {
   return findings;
 };
 
+function staticTitleOf(call: ts.CallExpression): string | null {
+  const first = call.arguments[0];
+  if (!first || !ts.isStringLiteralLike(first)) return null;
+  return first.text;
+}
+
+function isCurriedCallPrefix(node: ts.CallExpression): boolean {
+  return Boolean(node.parent && ts.isCallExpression(node.parent) && node.parent.expression === node);
+}
+
+/**
+ * Duplicate `it`/`test` or `describe` titles within the same lexical suite
+ * scope conceal copy-paste errors, make CI failure logs ambiguous, and collide
+ * on title-indexed snapshots or `--testNamePattern` filters.
+ */
+export const duplicateTestTitle: Rule = (context) => {
+  const findings: Finding[] = [];
+
+  function inspectScope(
+    root: ts.Node,
+    seenTests: Map<string, number>,
+    seenSuites: Map<string, number>,
+  ): void {
+    function visit(node: ts.Node): void {
+      if (node !== root) {
+        if (ts.isIfStatement(node)) {
+          inspectScope(node.thenStatement, new Map(seenTests), new Map(seenSuites));
+          if (node.elseStatement) {
+            inspectScope(node.elseStatement, new Map(seenTests), new Map(seenSuites));
+          }
+          return;
+        }
+
+        if (ts.isSwitchStatement(node)) {
+          for (const clause of node.caseBlock.clauses) {
+            inspectScope(clause, new Map(seenTests), new Map(seenSuites));
+          }
+          return;
+        }
+
+        if (isSuiteCall(node) && !isCurriedCallPrefix(node)) {
+          const title = staticTitleOf(node);
+          if (title !== null) {
+            const { line } = locate(context.source, node);
+            const firstLine = seenSuites.get(title);
+            if (firstLine !== undefined) {
+              findings.push(
+                finding(
+                  context,
+                  node,
+                  'duplicate-test-title',
+                  'P2',
+                  `Duplicate suite title "${title}" in the same parent scope (first defined on line ${firstLine}).`,
+                  'Give each test or describe block a distinct title describing its specific scenario so failures and snapshots remain unambiguous.',
+                ),
+              );
+            } else {
+              seenSuites.set(title, line);
+            }
+          }
+
+          const suiteBody = bodyOf(node);
+          if (suiteBody) {
+            inspectScope(suiteBody, new Map(), new Map());
+          }
+          return;
+        }
+
+        if (isTestCall(node) && !isCurriedCallPrefix(node)) {
+          const title = staticTitleOf(node);
+          if (title !== null) {
+            const { line } = locate(context.source, node);
+            const firstLine = seenTests.get(title);
+            if (firstLine !== undefined) {
+              findings.push(
+                finding(
+                  context,
+                  node,
+                  'duplicate-test-title',
+                  'P2',
+                  `Duplicate test title "${title}" in the same suite scope (first defined on line ${firstLine}).`,
+                  'Give each test or describe block a distinct title describing its specific scenario so failures and snapshots remain unambiguous.',
+                ),
+              );
+            } else {
+              seenTests.set(title, line);
+            }
+          }
+          return;
+        }
+      }
+
+      node.forEachChild(visit);
+    }
+
+    visit(root);
+  }
+
+  inspectScope(context.source, new Map(), new Map());
+  return findings;
+};
+
 export const rules: readonly Rule[] = [
   noAssertion,
   expectWithoutMatcher,
@@ -1434,4 +1536,5 @@ export const rules: readonly Rule[] = [
   redundantBooleanAssertion,
   floatingTimerAssertion,
   vacuousAssertion,
+  duplicateTestTitle,
 ];
