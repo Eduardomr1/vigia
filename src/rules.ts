@@ -1256,6 +1256,172 @@ export const floatingTimerAssertion: Rule = (context) => {
   return findings;
 };
 
+type VacuousCheckKind = 'truthy' | 'defined';
+
+type VacuousSubjectKind =
+  | 'object-literal'
+  | 'array-literal'
+  | 'function-expression'
+  | 'typeof-expression'
+  | 'template-literal'
+  | 'constant-literal';
+
+interface ParsedVacuousAssertion {
+  readonly actual: ts.Expression;
+  readonly checkKind: VacuousCheckKind;
+  readonly matcherLabel: string;
+  readonly isChaiAssert: boolean;
+}
+
+const CHAI_VACUOUS_MATCHERS: Record<string, VacuousCheckKind> = {
+  isOk: 'truthy',
+  isDefined: 'defined',
+  isNotNull: 'defined',
+  exists: 'defined',
+};
+
+function parseVacuousAssertion(node: ts.CallExpression): ParsedVacuousAssertion | null {
+  if (!ts.isPropertyAccessExpression(node.expression)) return null;
+
+  // Chai: assert.isOk(x), assert.isDefined(x), assert.isNotNull(x), assert.exists(x)
+  if (
+    ts.isIdentifier(node.expression.expression) &&
+    node.expression.expression.text === 'assert'
+  ) {
+    const chaiMethod = node.expression.name.text;
+    const checkKind = CHAI_VACUOUS_MATCHERS[chaiMethod];
+    const actualArg = node.arguments[0];
+    if (checkKind && actualArg) {
+      let actual = actualArg;
+      while (ts.isParenthesizedExpression(actual)) actual = actual.expression;
+      return {
+        actual,
+        checkKind,
+        matcherLabel: `assert.${chaiMethod}(...)`,
+        isChaiAssert: true,
+      };
+    }
+    return null;
+  }
+
+  // Jest / Vitest: expect(x).toBeTruthy(), .toBeDefined(), .not.toBeNull(), .not.toBeUndefined(), .not.toBeFalsy()
+  const matcher = node.expression.name.text;
+  if (node.arguments.length > 0) return null;
+
+  let hasNot = false;
+  let receiver: ts.Expression = node.expression.expression;
+  if (ts.isPropertyAccessExpression(receiver) && receiver.name.text === 'not') {
+    hasNot = true;
+    receiver = receiver.expression;
+  }
+
+  if (!ts.isCallExpression(receiver) || calleeName(receiver.expression) !== 'expect') {
+    return null;
+  }
+
+  const rawActual = receiver.arguments[0];
+  if (!rawActual) return null;
+
+  let actual = rawActual;
+  while (ts.isParenthesizedExpression(actual)) {
+    actual = actual.expression;
+  }
+
+  if (!hasNot && matcher === 'toBeTruthy') {
+    return { actual, checkKind: 'truthy', matcherLabel: '.toBeTruthy()', isChaiAssert: false };
+  }
+  if (!hasNot && matcher === 'toBeDefined') {
+    return { actual, checkKind: 'defined', matcherLabel: '.toBeDefined()', isChaiAssert: false };
+  }
+  if (hasNot && matcher === 'toBeFalsy') {
+    return { actual, checkKind: 'truthy', matcherLabel: '.not.toBeFalsy()', isChaiAssert: false };
+  }
+  if (hasNot && (matcher === 'toBeNull' || matcher === 'toBeUndefined')) {
+    return {
+      actual,
+      checkKind: 'defined',
+      matcherLabel: `.not.${matcher}()`,
+      isChaiAssert: false,
+    };
+  }
+
+  return null;
+}
+
+function classifyVacuousSubject(
+  actual: ts.Expression,
+  checkKind: VacuousCheckKind,
+): VacuousSubjectKind | null {
+  if (ts.isObjectLiteralExpression(actual)) return 'object-literal';
+  if (ts.isArrayLiteralExpression(actual)) return 'array-literal';
+  if (ts.isArrowFunction(actual) || ts.isFunctionExpression(actual)) return 'function-expression';
+  if (ts.isTypeOfExpression(actual)) return 'typeof-expression';
+
+  if (ts.isTemplateExpression(actual)) {
+    if (checkKind === 'defined') return 'template-literal';
+    const hasStaticText =
+      actual.head.text.length > 0 ||
+      actual.templateSpans.some((span) => span.literal.text.length > 0);
+    return hasStaticText ? 'template-literal' : null;
+  }
+
+  if (ts.isRegularExpressionLiteral(actual) || actual.kind === ts.SyntaxKind.TrueKeyword) {
+    return 'constant-literal';
+  }
+
+  if (actual.kind === ts.SyntaxKind.FalseKeyword) {
+    return checkKind === 'defined' ? 'constant-literal' : null;
+  }
+
+  if (ts.isNumericLiteral(actual)) {
+    if (checkKind === 'defined') return 'constant-literal';
+    return Number(actual.text) !== 0 ? 'constant-literal' : null;
+  }
+
+  if (ts.isStringLiteralLike(actual)) {
+    if (checkKind === 'defined') return 'constant-literal';
+    return actual.text.length > 0 ? 'constant-literal' : null;
+  }
+
+  return null;
+}
+
+/**
+ * Assertions checking truthiness or existence (`.toBeTruthy()`, `.toBeDefined()`,
+ * `.not.toBeNull()`, `.not.toBeUndefined()`) on expressions that JavaScript
+ * guarantees to be non-null and truthy by construction — such as object/array
+ * literals, uninvoked arrow functions, `typeof` expressions, or non-empty
+ * template/primitive literals — can never fail.
+ */
+export const vacuousAssertion: Rule = (context) => {
+  const findings: Finding[] = [];
+
+  walk(context.source, (node) => {
+    if (!ts.isCallExpression(node)) return;
+
+    const parsed = parseVacuousAssertion(node);
+    if (!parsed) return;
+
+    const subjectKind = classifyVacuousSubject(parsed.actual, parsed.checkKind);
+    if (!subjectKind) return;
+
+    const exprText = node.getText(context.source).replace(/\s+/g, ' ').trim();
+
+    findings.push(
+      finding(
+        context,
+        node,
+        'vacuous-assertion',
+        'P1',
+        `Vacuous assertion: ${exprText} always passes regardless of runtime state.`,
+        'Assert directly on the variable or call result under test instead of a guaranteed-truthy expression.',
+      ),
+    );
+  });
+
+  return findings;
+};
+
 export const rules: readonly Rule[] = [
   noAssertion,
   expectWithoutMatcher,
@@ -1267,4 +1433,5 @@ export const rules: readonly Rule[] = [
   assertionInCatch,
   redundantBooleanAssertion,
   floatingTimerAssertion,
+  vacuousAssertion,
 ];
