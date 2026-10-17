@@ -1082,6 +1082,180 @@ export const redundantBooleanAssertion: Rule = (context) => {
   return findings;
 };
 
+const TIMER_FUNCTIONS = new Set([
+  'setTimeout',
+  'setInterval',
+  'setImmediate',
+  'requestAnimationFrame',
+]);
+
+const GLOBAL_TIMER_HOSTS = new Set(['window', 'global', 'globalThis', 'self']);
+
+const FAKE_TIMER_RUNNERS = new Set([
+  'runAllTimers',
+  'runAllTimersAsync',
+  'advanceTimersByTime',
+  'advanceTimersByTimeAsync',
+  'runOnlyPendingTimers',
+  'runOnlyPendingTimersAsync',
+  'advanceTimersToNextTimer',
+  'advanceTimersToNextTimerAsync',
+  'runAllTicks',
+]);
+
+const CLOCK_TICK_METHODS = new Set(['tick', 'tickAsync', 'runAll', 'next']);
+
+function timerCalleeLabel(expression: ts.Expression): string | null {
+  if (ts.isIdentifier(expression) && TIMER_FUNCTIONS.has(expression.text)) {
+    return expression.text;
+  }
+
+  if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression)) {
+    const host = expression.expression.text;
+    const method = expression.name.text;
+    if (GLOBAL_TIMER_HOSTS.has(host) && TIMER_FUNCTIONS.has(method)) {
+      return `${host}.${method}`;
+    }
+    if (host === 'process' && method === 'nextTick') {
+      return 'process.nextTick';
+    }
+  }
+
+  return null;
+}
+
+function testCallbackOf(
+  call: ts.CallExpression,
+): ts.ArrowFunction | ts.FunctionExpression | null {
+  for (const argument of call.arguments) {
+    if (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)) {
+      return argument;
+    }
+  }
+  return null;
+}
+
+function isDoneStyleCallback(fn: ts.ArrowFunction | ts.FunctionExpression): boolean {
+  const isAsync = Boolean(fn.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword));
+  if (isAsync) return false;
+  const firstParam = fn.parameters[0];
+  return Boolean(firstParam && ts.isIdentifier(firstParam.name));
+}
+
+function advancesFakeTimers(testBody: ts.Node): boolean {
+  let found = false;
+
+  walk(testBody, (node) => {
+    if (found || !ts.isCallExpression(node)) return;
+    if (!ts.isPropertyAccessExpression(node.expression)) return;
+
+    const method = node.expression.name.text;
+    const target = node.expression.expression;
+    if (!ts.isIdentifier(target)) return;
+
+    if ((target.text === 'jest' || target.text === 'vi') && FAKE_TIMER_RUNNERS.has(method)) {
+      found = true;
+      return;
+    }
+
+    if ((target.text === 'clock' || target.text === 'cy') && CLOCK_TICK_METHODS.has(method)) {
+      found = true;
+    }
+  });
+
+  return found;
+}
+
+function isInsidePromiseExecutor(node: ts.Node, boundary: ts.Node): boolean {
+  let current: ts.Node | undefined = node.parent;
+  while (current && current !== boundary) {
+    if (
+      ts.isNewExpression(current) &&
+      ts.isIdentifier(current.expression) &&
+      current.expression.text === 'Promise'
+    ) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function isAssertionCallNode(node: ts.CallExpression): boolean {
+  const callee = node.expression;
+  if (calleeName(callee) === 'expect') return true;
+  if (ts.isPropertyAccessExpression(callee)) {
+    if (ASSERTION_METHODS.has(callee.name.text)) return true;
+    if (ts.isIdentifier(callee.expression) && callee.expression.text === 'assert') return true;
+  }
+  return false;
+}
+
+function containsDirectTimerAssertion(callbackBody: ts.Node): boolean {
+  let found = false;
+
+  function visit(node: ts.Node): void {
+    if (found) return;
+    if (ts.isCallExpression(node)) {
+      if (timerCalleeLabel(node.expression) !== null) return;
+      if (isAssertionCallNode(node)) {
+        found = true;
+        return;
+      }
+    }
+    node.forEachChild(visit);
+  }
+
+  visit(callbackBody);
+  return found;
+}
+
+/**
+ * Assertions placed inside unawaited timer callbacks (`setTimeout`,
+ * `setInterval`, `setImmediate`, `requestAnimationFrame`, `process.nextTick`)
+ * execute after the test body has already returned green unless fake timers
+ * are advanced, a `done` callback is used, or the timer is wrapped in an
+ * awaited `Promise`.
+ */
+export const floatingTimerAssertion: Rule = (context) => {
+  const findings: Finding[] = [];
+
+  walk(context.source, (node) => {
+    if (!isTestCall(node)) return;
+    const testFn = testCallbackOf(node);
+    if (!testFn) return;
+
+    if (isDoneStyleCallback(testFn)) return;
+    if (advancesFakeTimers(testFn.body)) return;
+
+    walk(testFn.body, (inner) => {
+      if (!ts.isCallExpression(inner)) return;
+      const timerName = timerCalleeLabel(inner.expression);
+      if (timerName === null) return;
+
+      const callbackArg = inner.arguments[0];
+      if (!callbackArg) return;
+      if (!ts.isArrowFunction(callbackArg) && !ts.isFunctionExpression(callbackArg)) return;
+
+      if (isInsidePromiseExecutor(inner, testFn.body)) return;
+      if (!containsDirectTimerAssertion(callbackArg.body)) return;
+
+      findings.push(
+        finding(
+          context,
+          inner,
+          'floating-timer-assertion',
+          'P1',
+          `Assertion inside ${timerName}() callback runs after the test finishes and will not fail the test reliably.`,
+          'Advance fake timers (e.g. jest.advanceTimersByTime(...) / vi.advanceTimersByTime(...)), wrap the timer in an awaited Promise, or use await expect.poll(...).',
+        ),
+      );
+    });
+  });
+
+  return findings;
+};
+
 export const rules: readonly Rule[] = [
   noAssertion,
   expectWithoutMatcher,
@@ -1092,4 +1266,5 @@ export const rules: readonly Rule[] = [
   missingAwait,
   assertionInCatch,
   redundantBooleanAssertion,
+  floatingTimerAssertion,
 ];
