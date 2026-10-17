@@ -348,6 +348,104 @@ describe('missingAwait in Playwright', () => {
       ),
     ).toHaveLength(1);
   });
+
+  it('detects expect.soft locator assertions without await in Playwright', () => {
+    const result = findings(
+      `${IMPORT}test('a', async ({ page }) => { expect.soft(page.locator('#alert')).toBeVisible(); });`,
+      [missingAwait],
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]?.rule).toBe('missing-await');
+    expect(result[0]?.message).toContain('toBeVisible');
+  });
+
+  it('accepts expect.soft locator assertions with await in Playwright', () => {
+    expect(
+      findings(
+        `${IMPORT}test('a', async ({ page }) => { await expect.soft(page.locator('#alert')).toBeVisible(); });`,
+        [missingAwait],
+      ),
+    ).toEqual([]);
+  });
+
+  it('detects expect(...).toPass() retry blocks without await', () => {
+    const result = findings(
+      `${IMPORT}test('a', async () => {
+         expect(async () => {
+           expect(await fetchStatus()).toBe(200);
+         }).toPass({ timeout: 5000 });
+       });`,
+      [missingAwait],
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]?.message).toContain('toPass');
+  });
+
+  it('detects expect(...).not.toPass() without await even via custom fixture imports', () => {
+    const result = findings(
+      `import { test, expect } from './fixtures';
+       test('a', async () => {
+         expect(async () => {
+           expect(await ping()).toBe('pong');
+         }).not.toPass();
+       });`,
+      [missingAwait],
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]?.message).toContain('toPass');
+  });
+
+  it('accepts expect(...).toPass() when awaited', () => {
+    expect(
+      findings(
+        `${IMPORT}test('a', async () => {
+           await expect(async () => {
+             expect(await fetchStatus()).toBe(200);
+           }).toPass();
+         });`,
+        [missingAwait],
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('missingAwait with expect.poll', () => {
+  it.each([
+    `expect.poll(() => getStatus()).toBe('ready');`,
+    `expect.poll(async () => fetchCount(), { timeout: 3000 }).toBeGreaterThan(0);`,
+    `expect.poll(() => items.length).not.toBe(0);`,
+  ])('detects %s without await in Vitest or Playwright', (assertion) => {
+    const result = findings(`it('polls state', async () => { ${assertion} });`, [missingAwait]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.rule).toBe('missing-await');
+    expect(result[0]?.severity).toBe('P1');
+    expect(result[0]?.message).toContain('expect.poll(...)');
+  });
+
+  it('accepts awaited or returned expect.poll assertions', () => {
+    expect(
+      findings(
+        `it('polls state', async () => {
+           await expect.poll(() => getStatus()).toBe('ready');
+         });
+         it('returns poll promise', () => {
+           return expect.poll(() => getStatus()).toBe('ready');
+         });`,
+        [missingAwait],
+      ),
+    ).toEqual([]);
+  });
+
+  it('does not flag synchronous expect.soft assertions in Vitest', () => {
+    expect(
+      findings(
+        `it('soft sync', () => {
+           expect.soft(sum(1, 2)).toBe(3);
+         });`,
+        [missingAwait],
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe('noAssertion with other assertion forms', () => {
