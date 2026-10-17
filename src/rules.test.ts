@@ -2,6 +2,7 @@ import { analyzeSource } from './analyze';
 import {
   assertionInCatch,
   expectWithoutMatcher,
+  floatingTimerAssertion,
   focusedTest,
   identicalExpression,
   missingAwait,
@@ -1381,5 +1382,151 @@ describe('redundantBooleanAssertion', () => {
     });
   });
 });
+
+describe('floatingTimerAssertion', () => {
+  describe('positive cases', () => {
+    it.each([
+      ['setTimeout', `setTimeout(() => { expect(getCount()).toBe(1); }, 100);`],
+      ['setInterval', `setInterval(() => { expect(isReady()).toBe(true); }, 50);`],
+      ['setImmediate', `setImmediate(() => { expect(result).toBe('ok'); });`],
+      ['requestAnimationFrame', `requestAnimationFrame(() => { expect(frame).toBe(2); });`],
+      ['window.setTimeout', `window.setTimeout(() => { expect(state).toBe('open'); }, 10);`],
+      ['globalThis.setTimeout', `globalThis.setTimeout(function () { expect(doneFlag).toBe(true); }, 25);`],
+      ['process.nextTick', `process.nextTick(() => { expect(flushed).toBe(true); });`],
+    ])('detects unawaited assertion inside %s callback', (label, timerCode) => {
+      const result = findings(
+        `it('checks delayed effect', () => {
+           triggerAction();
+           ${timerCode}
+         });`,
+        [floatingTimerAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('floating-timer-assertion');
+      expect(result[0]?.severity).toBe('P1');
+      expect(result[0]?.message).toContain(`${label}()`);
+      expect(result[0]?.hint).toContain('advanceTimersByTime');
+    });
+
+    it('detects Chai and Cypress assertions trapped in floating timers', () => {
+      const result = findings(
+        `it('checks delayed chai & cypress', () => {
+           setTimeout(() => {
+             assert.equal(getStatus(), 'ready');
+           }, 50);
+           setTimeout(() => {
+             cy.get('#banner').should('be.visible');
+           }, 50);
+         });`,
+        [floatingTimerAssertion],
+      );
+
+      expect(result).toHaveLength(2);
+    });
+
+    it('still flags floating timers in async Playwright tests with destructured fixtures', () => {
+      const result = findings(
+        `test('playwright floating timer', async ({ page }) => {
+           await page.goto('/');
+           setTimeout(() => {
+             expect(page.url()).toContain('/dashboard');
+           }, 200);
+         });`,
+        [floatingTimerAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('floating-timer-assertion');
+    });
+
+    it('reports only the innermost timer when timers are nested', () => {
+      const result = findings(
+        `it('nested timers', () => {
+           setTimeout(() => {
+             setTimeout(() => {
+               expect(value).toBe(42);
+             }, 20);
+           }, 50);
+         });`,
+        [floatingTimerAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.line).toBe(3);
+    });
+  });
+
+  describe('safe patterns (no false positives)', () => {
+    it('accepts synchronous tests declaring a done completion callback', () => {
+      expect(
+        findings(
+          `it('completes via done callback', (done) => {
+             triggerAction();
+             setTimeout(() => {
+               expect(getCount()).toBe(1);
+               done();
+             }, 20);
+           });`,
+          [floatingTimerAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts timers wrapped inside a new Promise executor', () => {
+      expect(
+        findings(
+          `it('awaits promise-wrapped timer', async () => {
+             await new Promise<void>((resolve) => {
+               setTimeout(() => {
+                 expect(getCount()).toBe(1);
+                 resolve();
+               }, 20);
+             });
+           });`,
+          [floatingTimerAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it.each([
+      `jest.advanceTimersByTime(100);`,
+      `jest.runAllTimers();`,
+      `jest.runOnlyPendingTimers();`,
+      `vi.advanceTimersByTime(100);`,
+      `await vi.advanceTimersByTimeAsync(100);`,
+      `vi.runAllTimers();`,
+      `clock.tick(100);`,
+      `cy.tick(100);`,
+    ])('accepts fake timer progression via %s', (runnerCall) => {
+      expect(
+        findings(
+          `it('advances fake timers', async () => {
+             setTimeout(() => {
+               expect(getCount()).toBe(1);
+             }, 100);
+             ${runnerCall}
+           });`,
+          [floatingTimerAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores timer callbacks that perform setup without assertions', () => {
+      expect(
+        findings(
+          `it('uses timer only to emit event', async () => {
+             setTimeout(() => {
+               emitter.emit('ready', 42);
+             }, 10);
+             await expect(waitForEvent(emitter, 'ready')).resolves.toBe(42);
+           });`,
+          [floatingTimerAssertion],
+        ),
+      ).toEqual([]);
+    });
+  });
+});
+
 
 
