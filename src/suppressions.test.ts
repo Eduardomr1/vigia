@@ -1,4 +1,6 @@
-import { extractSuppressions } from './suppressions';
+import { analyzeSource } from './analyze';
+import { applySuppressions, extractSuppressions } from './suppressions';
+import type { Finding } from './types';
 
 describe('extractSuppressions', () => {
   it('extracts single-line suppression with rule and reason', () => {
@@ -69,5 +71,77 @@ describe('extractSuppressions', () => {
     `;
     const result = extractSuppressions(code);
     expect(result).toHaveLength(0);
+  });
+});
+
+describe('applySuppressions', () => {
+  const dummyFinding: Finding = {
+    rule: 'tautology',
+    severity: 'P1',
+    file: 'demo.test.ts',
+    line: 5,
+    column: 5,
+    message: 'Tautology detected',
+    hint: 'Fix assertion',
+  };
+
+  it('filters out matching finding on target line', () => {
+    const suppressions = [
+      {
+        commentLine: 4,
+        targetLine: 5,
+        rules: ['tautology'],
+        reason: 'verified baseline equivalence',
+        column: 1,
+      },
+    ];
+
+    const findings = applySuppressions([dummyFinding], suppressions, 'demo.test.ts');
+    expect(findings).toHaveLength(0);
+  });
+
+  it('emits unjustified-suppression when suppression lacks reason', () => {
+    const suppressions = [
+      {
+        commentLine: 4,
+        targetLine: 5,
+        rules: ['tautology'],
+        column: 1,
+      },
+    ];
+
+    const findings = applySuppressions([dummyFinding], suppressions, 'demo.test.ts');
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.rule).toBe('unjustified-suppression');
+    expect(findings[0]?.severity).toBe('P2');
+  });
+
+  it('emits unused-suppression warning when suppression targets a line with no violations', () => {
+    const suppressions = [
+      {
+        commentLine: 10,
+        targetLine: 11,
+        rules: ['no-assertion'],
+        reason: 'supposedly has no assertion',
+        column: 1,
+      },
+    ];
+
+    const findings = applySuppressions([], suppressions, 'demo.test.ts');
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.rule).toBe('unused-suppression');
+    expect(findings[0]?.severity).toBe('P3');
+  });
+
+  it('integrates seamlessly with analyzeSource', () => {
+    const code = `
+      it('suppressed tautology', () => {
+        // vigia-ignore-next-line tautology -- testing custom equivalence
+        expect(1).toBe(1);
+      });
+    `;
+    const findings = analyzeSource('test.spec.ts', code);
+    expect(findings.filter((f) => f.rule === 'tautology')).toHaveLength(0);
+    expect(findings.filter((f) => f.rule === 'unused-suppression')).toHaveLength(0);
   });
 });
