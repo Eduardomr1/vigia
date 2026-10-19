@@ -1,4 +1,5 @@
-import { countBySeverity, renderReport } from './report';
+import { runCli } from './cli';
+import { countBySeverity, renderExecutiveTable, renderReport } from './report';
 import type { Finding } from './types';
 
 function finding(overrides: Partial<Finding> = {}): Finding {
@@ -61,12 +62,32 @@ describe('renderReport', () => {
     );
   });
 
-  // The marker lets the previous comment be replaced instead of piling up
-  // one per commit.
   it('leaves a marker so the comment can be updated', () => {
     expect(renderReport({ findings: [finding()], filesAnalyzed: 1 })).toContain(
       '<!-- vigia -->',
     );
+  });
+
+  it('includes executive summary table header and row entries', () => {
+    const report = renderReport({
+      findings: [
+        finding({ file: 'src/core.test.ts', line: 42, rule: 'no-assertion', severity: 'P1' }),
+      ],
+      filesAnalyzed: 1,
+    });
+    expect(report).toContain('### Executive Summary');
+    expect(report).toContain('| File | Line | Severity | Rule | Message |');
+    expect(report).toContain('| `src/core.test.ts` | 42 | **P1** | `no-assertion` |');
+  });
+});
+
+describe('renderExecutiveTable', () => {
+  it('formats rows and escapes pipe characters in message', () => {
+    const table = renderExecutiveTable([
+      finding({ message: 'Found pipe | character in assertion' }),
+    ]);
+    expect(table).toContain('Found pipe \\| character in assertion');
+    expect(table).toContain('| :--- | :---: | :---: | :--- | :--- |');
   });
 });
 
@@ -79,5 +100,13 @@ describe('countBySeverity', () => {
 
   it('returns zeros with no findings', () => {
     expect(countBySeverity([])).toEqual({ P1: 0, P2: 0, P3: 0 });
+  });
+});
+
+describe('CLI markdown formatting', () => {
+  it('outputs markdown comment with executive summary via --format markdown', () => {
+    const result = runCli(['--files', 'src/report.test.ts', '--format', 'markdown'], { writeStdout: false });
+    expect(result.outputText).toContain('## Vigía');
+    expect(result.outputText).toContain('No findings in 1 test file.');
   });
 });
