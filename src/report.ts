@@ -2,12 +2,37 @@
  * Format of the comment posted on the Pull Request.
  *
  * In Markdown and grouped by file: whoever reads a PR reviews it file by
- * file, not rule by rule.
+ * file, not rule by rule. Includes an executive summary table for quick
+ * triage of blocker issues.
  */
 
 import type { AnalysisResult, Finding, Severity } from './types';
 
 const SEVERITY_ORDER: Record<Severity, number> = { P1: 0, P2: 1, P3: 2 };
+
+/**
+ * Renders an executive markdown table of findings sorted by severity and location.
+ */
+export function renderExecutiveTable(findings: readonly Finding[]): string {
+  const sorted = [...findings].sort(
+    (a, b) =>
+      SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] ||
+      a.file.localeCompare(b.file) ||
+      a.line - b.line,
+  );
+
+  const rows = [
+    '| File | Line | Severity | Rule | Message |',
+    '| :--- | :---: | :---: | :--- | :--- |',
+  ];
+
+  for (const f of sorted) {
+    const escapedMsg = f.message.replace(/\|/g, '\\|');
+    rows.push(`| \`${f.file}\` | ${f.line} | **${f.severity}** | \`${f.rule}\` | ${escapedMsg} |`);
+  }
+
+  return rows.join('\n');
+}
 
 export function renderReport(result: AnalysisResult): string {
   const { findings, filesAnalyzed } = result;
@@ -27,6 +52,10 @@ export function renderReport(result: AnalysisResult): string {
     '## Vigía',
     '',
     `${findings.length} ${findings.length === 1 ? 'finding' : 'findings'} in ${filesAnalyzed} ${plural}: ${summary}`,
+    '',
+    '### Executive Summary',
+    '',
+    renderExecutiveTable(findings),
     '',
   ];
 

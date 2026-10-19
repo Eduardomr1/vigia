@@ -1,7 +1,7 @@
 export { analyzeFiles, analyzeSource, collectTestFiles, isTestFile } from './analyze';
 export { applySuppressions, extractSuppressions } from './suppressions';
 export type { InlineSuppression } from './suppressions';
-export { countBySeverity, renderReport } from './report';
+export { countBySeverity, renderExecutiveTable, renderReport } from './report';
 export { renderSarif, validateSarifCompliance } from './sarif';
 export {
   assertionInCatch,
