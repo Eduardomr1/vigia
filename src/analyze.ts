@@ -8,6 +8,7 @@ import ts from 'typescript';
 
 import { collectKnownIds, orphanNegativeAssertions, type KnownIds } from './orphan';
 import { rules, type Rule, type RuleContext } from './rules';
+import { applySuppressions, extractSuppressions } from './suppressions';
 import type { AnalysisResult, Finding } from './types';
 
 const TEST_FILE = /\.(test|spec)\.(ts|tsx|js|jsx)$/;
@@ -39,9 +40,15 @@ export function analyzeSource(file: string, code: string, active: readonly Rule[
   const source = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true);
   const context: RuleContext = { file, source };
 
-  return active
+  const rawFindings = active
     .flatMap((rule) => rule(context))
     .sort((a, b) => a.line - b.line || a.column - b.column);
+
+  const suppressions = extractSuppressions(code);
+  if (suppressions.length === 0) {
+    return rawFindings;
+  }
+  return applySuppressions(rawFindings, suppressions, file);
 }
 
 export function analyzeFiles(

@@ -12,6 +12,8 @@
  * to prevent blind silencing of failing test detections.
  */
 
+import type { Finding } from './types';
+
 export interface InlineSuppression {
   /** 1-based line where the suppression comment appears */
   readonly commentLine: number;
@@ -93,4 +95,58 @@ export function extractSuppressions(code: string): InlineSuppression[] {
   }
 
   return suppressions;
+}
+
+/**
+ * Applies inline suppressions to findings, removing suppressed findings and generating
+ * warnings for unjustified or unused suppression comments.
+ */
+export function applySuppressions(
+  findings: readonly Finding[],
+  suppressions: readonly InlineSuppression[],
+  file: string,
+): Finding[] {
+  const result: Finding[] = [];
+  const usedSuppressions = new Set<InlineSuppression>();
+
+  for (const s of suppressions) {
+    if (!s.reason || s.reason.trim().length === 0) {
+      result.push({
+        rule: 'unjustified-suppression',
+        severity: 'P2',
+        file,
+        line: s.commentLine,
+        column: s.column,
+        message: 'Inline suppression directive requires a justification reason after "-- <reason>".',
+        hint: 'Provide a concise justification for silencing test health findings.',
+      });
+    }
+  }
+
+  for (const finding of findings) {
+    const matching = suppressions.find(
+      (s) => s.targetLine === finding.line && (s.rules.includes('*') || s.rules.includes(finding.rule)),
+    );
+    if (matching) {
+      usedSuppressions.add(matching);
+    } else {
+      result.push(finding);
+    }
+  }
+
+  for (const s of suppressions) {
+    if (!usedSuppressions.has(s)) {
+      result.push({
+        rule: 'unused-suppression',
+        severity: 'P3',
+        file,
+        line: s.commentLine,
+        column: s.column,
+        message: `Unused suppression comment. No finding matching "${s.rules.join(', ')}" was detected on line ${s.targetLine}.`,
+        hint: 'Remove this obsolete suppression comment.',
+      });
+    }
+  }
+
+  return result.sort((a, b) => a.line - b.line || a.column - b.column);
 }
