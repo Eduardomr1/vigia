@@ -1524,6 +1524,94 @@ export const duplicateTestTitle: Rule = (context) => {
   return findings;
 };
 
+function isSpyOrMockCreation(expr: ts.Expression): { isCreation: boolean; kind: string } {
+  if (!ts.isCallExpression(expr)) return { isCreation: false, kind: '' };
+
+  const callee = expr.expression;
+  if (ts.isPropertyAccessExpression(callee)) {
+    const obj = callee.expression;
+    const prop = callee.name.text;
+    if (ts.isIdentifier(obj)) {
+      const objName = obj.text;
+      if ((objName === 'jest' || objName === 'vi') && (prop === 'spyOn' || prop === 'fn')) {
+        return { isCreation: true, kind: `${objName}.${prop}` };
+      }
+      if (objName === 'sinon' && (prop === 'spy' || prop === 'stub')) {
+        return { isCreation: true, kind: `sinon.${prop}` };
+      }
+    }
+  }
+
+  return { isCreation: false, kind: '' };
+}
+
+function isIdentifierAsserted(identifierName: string, body: ts.Node): boolean {
+  let asserted = false;
+
+  walk(body, (node) => {
+    if (asserted || !ts.isCallExpression(node)) return;
+
+    const callee = node.expression;
+    const calleeStr = calleeName(callee);
+
+    const isAssertionCall =
+      calleeStr === 'expect' ||
+      calleeStr === 'assert' ||
+      (ts.isPropertyAccessExpression(callee) && ASSERTION_METHODS.has(callee.name.text));
+
+    if (isAssertionCall) {
+      walk(node, (inner) => {
+        if (ts.isIdentifier(inner) && inner.text === identifierName) {
+          asserted = true;
+        }
+      });
+    }
+  });
+
+  return asserted;
+}
+
+/**
+ * Flags test spies or mock functions created inside a test that are never verified
+ * with an assertion.
+ */
+export const mockWithoutAssertion: Rule = (context) => {
+  const findings: Finding[] = [];
+
+  walk(context.source, (node) => {
+    if (!isTestCall(node)) return;
+    const body = bodyOf(node);
+    if (!body) return;
+
+    walk(body, (inner) => {
+      if (!ts.isVariableDeclaration(inner) || !inner.initializer) return;
+      if (!ts.isIdentifier(inner.name)) return;
+
+      const varName = inner.name.text;
+      const { isCreation, kind } = isSpyOrMockCreation(inner.initializer);
+      if (!isCreation) return;
+
+      const isObservingSpy = kind.includes('spyOn') || /(?:spy|mock)/i.test(varName);
+      if (!isObservingSpy) return;
+
+      if (!isIdentifierAsserted(varName, body)) {
+        findings.push(
+          finding(
+            context,
+            inner,
+            'mock-without-assertion',
+            'P2',
+            `Spy/mock "${varName}" was created with ${kind} but is never asserted with expect().`,
+            `Add an assertion verifying calls (e.g. "expect(${varName}).toHaveBeenCalled()") or remove the unasserted spy.`,
+          ),
+        );
+      }
+    });
+  });
+
+  return findings;
+};
+
 export const rules: readonly Rule[] = [
   noAssertion,
   expectWithoutMatcher,

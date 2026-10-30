@@ -11,6 +11,7 @@ export {
   focusedTest,
   identicalExpression,
   missingAwait,
+  mockWithoutAssertion,
   noAssertion,
   redundantBooleanAssertion,
   rules,
