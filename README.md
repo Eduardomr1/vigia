@@ -41,7 +41,7 @@ Real output from `node dist/cli.js ejemplo` against the fixture in this repo —
 
 ## What it detects
 
-Ten checks, all built on the same idea: a test that can't fail is worse than no test, because it occupies the place of one that would.
+Thirteen AST-powered checks, all built on the same idea: a test that can't fail is worse than no test, because it occupies the place of one that would.
 
 | Rule | Severity | Example |
 |---|---|---|
@@ -49,14 +49,34 @@ Ten checks, all built on the same idea: a test that can't fail is worse than no 
 | **`expect()` without a matcher** | P1 | `expect(result)` with no `.toBe(...)` chained after it |
 | **Tautology** | P1 | `expect(true).toBe(true)`, comparing a literal to itself |
 | **Identical expression** | P1 | `expect(user.id).toBe(user.id)`, comparing an expression to itself |
-| **Redundant boolean assertion** | P2 | `expect(a === b).toBe(true)` — hides diffs; should be `expect(a).toBe(b)` |
+| **Floating timer assertion** | P1 | `setTimeout(() => { expect(...); })` without awaiting or fake timer advance |
+| **Vacuous assertion** | P1 | `expect({}).toBeTruthy()` or `expect([]).toBeDefined()` checking truthiness on object literals |
 | **Missing `await`** | P1 | `expect(promise).rejects.toThrow()` with no `await` — the test ends before the promise settles |
 | **Assertion in `catch`** | P1 | `try { await op(); } catch (e) { expect(e)... }` without a failure guard in `try` — passes silently if `op()` never throws |
 | **Focused test (`.only`)** | P1 | `it.only(...)` silently skips the rest of the suite in CI |
+| **Duplicate test title** | P2 | Multiple tests sharing identical title in the same describe scope |
+| **Mock without assertion** | P2 | `jest.spyOn()` or `vi.spyOn()` created in test but never verified with `expect()` |
+| **Redundant boolean assertion** | P2 | `expect(a === b).toBe(true)` — hides diffs; should be `expect(a).toBe(b)` |
 | **Skipped test** | P3 | `it.skip` / `xit` left behind past its reason for existing |
 | **Orphan negative assertion** | P1 / P2 | `queryByTestId('x')` expected to be null/absent, but `"x"` never appears anywhere in the source — the assertion can't fail because the thing it denies doesn't exist |
 
-The first nine run on any Jest or Vitest test file, with native support for Cypress (`.should()`, `.and()`), Chai (`assert.*`) and Playwright's async locator matchers (`toBeVisible`, `toHaveText`, etc. — every Playwright assertion is a promise, so a missing `await` is invisible on the page but silent in the suite). The tenth needs `--src` pointed at your source root, and also reads Maestro YAML flows for the same defect in E2E specs.
+The first twelve run on any Jest or Vitest test file, with native support for Cypress (`.should()`, `.and()`), Chai (`assert.*`) and Playwright's async locator matchers (`toBeVisible`, `toHaveText`, etc.). The orphan negative check needs `--src` pointed at your source root, and also reads Maestro YAML flows for the same defect in E2E specs.
+
+### Inline Suppressions
+
+When a rule violation is an intentional edge-case or benchmark test, suppress it cleanly on the line immediately preceding the test or assertion:
+
+```ts
+// vigia-ignore-next-line duplicate-test-title -- intentional duplicate snapshot test
+it('renders card', () => { ... });
+```
+
+Vigía requires a non-empty justification (`-- <reason>`). Orphan or unjustified suppressions are flagged as `unused-suppression` (P3) or `unjustified-suppression` (P2) to keep the test suite disciplined.
+
+### Executive PR Reports & SARIF Code Scanning
+
+- **Executive Markdown Table**: Emits GitHub PR comments with an executive summary table and file-by-file triage actions (`--format markdown`).
+- **OASIS SARIF v2.1.0**: Native integration with GitHub Code Scanning alerts (`--format sarif -o results.sarif`).
 
 ---
 
