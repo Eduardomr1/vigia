@@ -7,6 +7,7 @@ import {
   focusedTest,
   identicalExpression,
   missingAwait,
+  mockWithoutAssertion,
   noAssertion,
   redundantBooleanAssertion,
   skippedTest,
@@ -1748,6 +1749,102 @@ describe('duplicateTestTitle', () => {
              }
            });`,
           [duplicateTestTitle],
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  describe('mockWithoutAssertion', () => {
+    it('detects jest.spyOn when no assertion verifies it', () => {
+      const result = findings(
+        `it('fetches data', () => {
+           const fetchSpy = jest.spyOn(api, 'fetch');
+           fetchData();
+           expect(state.loaded).toBe(true);
+         });`,
+        [mockWithoutAssertion],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('mock-without-assertion');
+      expect(result[0]?.severity).toBe('P2');
+      expect(result[0]?.message).toContain('fetchSpy');
+      expect(result[0]?.message).toContain('jest.spyOn');
+    });
+
+    it('detects vi.spyOn when unasserted', () => {
+      const result = findings(
+        `it('sends email', () => {
+           const emailSpy = vi.spyOn(mailer, 'send');
+           triggerNotification();
+           expect(result.status).toBe('ok');
+         });`,
+        [mockWithoutAssertion],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('mock-without-assertion');
+    });
+
+    it('detects jest.fn named mock or spy without assertion', () => {
+      const result = findings(
+        `it('handles callback', () => {
+           const callbackSpy = jest.fn();
+           runAction(callbackSpy);
+           expect(isDone()).toBe(true);
+         });`,
+        [mockWithoutAssertion],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('mock-without-assertion');
+    });
+
+    it('accepts spy verified via expect(spy).toHaveBeenCalled()', () => {
+      expect(
+        findings(
+          `it('fetches data', () => {
+             const fetchSpy = jest.spyOn(api, 'fetch');
+             fetchData();
+             expect(fetchSpy).toHaveBeenCalled();
+           });`,
+          [mockWithoutAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts spy verified via expect(spy).toHaveBeenCalledWith(...)', () => {
+      expect(
+        findings(
+          `it('dispatches event', () => {
+             const dispatchSpy = jest.spyOn(bus, 'emit');
+             bus.emit('event', 123);
+             expect(dispatchSpy).toHaveBeenCalledWith('event', 123);
+           });`,
+          [mockWithoutAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts mock verified via property access in expect', () => {
+      expect(
+        findings(
+          `it('tracks count', () => {
+             const counterMock = jest.fn();
+             counterMock();
+             expect(counterMock.mock.calls.length).toBe(1);
+           });`,
+          [mockWithoutAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores dummy handler not named spy or mock', () => {
+      expect(
+        findings(
+          `it('renders button with noop', () => {
+             const onClick = jest.fn();
+             renderButton({ onClick });
+             expect(buttonIsVisible()).toBe(true);
+           });`,
+          [mockWithoutAssertion],
         ),
       ).toEqual([]);
     });
