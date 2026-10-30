@@ -1625,4 +1625,5 @@ export const rules: readonly Rule[] = [
   floatingTimerAssertion,
   vacuousAssertion,
   duplicateTestTitle,
+  mockWithoutAssertion,
 ];

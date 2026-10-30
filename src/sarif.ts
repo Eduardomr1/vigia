@@ -71,6 +71,7 @@ const RULE_DESCRIPTIONS: Record<string, string> = {
   'floating-timer-assertion': 'Assertion inside an unawaited timer callback executes after the test finishes.',
   'vacuous-assertion': 'Assertion checks truthiness or existence on an expression guaranteed truthy by construction.',
   'duplicate-test-title': 'Multiple tests or suites share an identical title within the same lexical scope.',
+  'mock-without-assertion': 'Test spy or mock function is created but never asserted with expect().',
   'unjustified-suppression': 'Inline suppression comment is missing required justification reason.',
   'unused-suppression': 'Inline suppression comment does not match any active finding on the target line.',
 };

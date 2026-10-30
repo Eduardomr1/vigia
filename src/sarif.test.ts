@@ -466,6 +466,27 @@ describe('CLI --format sarif and output options (-o, --output)', () => {
       expect(validateSarifCompliance(parsed).valid).toBe(true);
       expect(parsed.runs[0]?.results).toHaveLength(0);
     });
+
+    it('properly serializes mock-without-assertion rule into SARIF', () => {
+      const result: AnalysisResult = {
+        filesAnalyzed: 1,
+        findings: [
+          {
+            rule: 'mock-without-assertion',
+            severity: 'P2',
+            file: 'src/service.test.ts',
+            line: 15,
+            column: 5,
+            message: 'Spy/mock "apiSpy" was created with jest.spyOn but is never asserted with expect().',
+            hint: 'Add an assertion.',
+          },
+        ],
+      };
+      const parsed = JSON.parse(renderSarif(result)) as SarifLog;
+      expect(parsed.runs[0]?.tool.driver.rules[0]?.id).toBe('mock-without-assertion');
+      expect(parsed.runs[0]?.results[0]?.level).toBe('warning');
+      expect(validateSarifCompliance(parsed).valid).toBe(true);
+    });
   });
 });
 
