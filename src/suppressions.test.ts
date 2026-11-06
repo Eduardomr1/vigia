@@ -144,4 +144,22 @@ describe('applySuppressions', () => {
     expect(findings.filter((f) => f.rule === 'tautology')).toHaveLength(0);
     expect(findings.filter((f) => f.rule === 'unused-suppression')).toHaveLength(0);
   });
+
+  it('suppresses uninvoked-matcher and conditional-assertion when annotated with valid justification', () => {
+    const code = `
+      it('suppresses new AST rules with reason', () => {
+        // vigia-ignore-next-line uninvoked-matcher -- testing property reference
+        expect(target).toBeDefined;
+
+        if (ready) {
+          // vigia-ignore-next-line conditional-assertion -- testing intentional branch
+          expect(ready).toBe(true);
+        }
+      });
+    `;
+    const findings = analyzeSource('test.spec.ts', code);
+    expect(findings.filter((f) => f.rule === 'uninvoked-matcher')).toHaveLength(0);
+    expect(findings.filter((f) => f.rule === 'conditional-assertion')).toHaveLength(0);
+    expect(findings.filter((f) => f.rule === 'unused-suppression')).toHaveLength(0);
+  });
 });

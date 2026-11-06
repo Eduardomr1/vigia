@@ -92,6 +92,29 @@ describe('analyzeFiles', () => {
     expect(analyzeFiles([a, b]).findings).toHaveLength(2);
   });
 
+  it('detects uninvoked-matcher and conditional-assertion in multi-file suite analysis', () => {
+    const a = write(
+      'uninvoked.test.ts',
+      `it('dangling matcher', () => {
+         expect(user).toBeDefined;
+       });`,
+    );
+    const b = write(
+      'conditional.test.ts',
+      `it('unguarded if', () => {
+         if (isValid) {
+           expect(result).toBe(true);
+         }
+       });`,
+    );
+
+    const result = analyzeFiles([a, b]);
+    expect(result.filesAnalyzed).toBe(2);
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings.some((f) => f.rule === 'uninvoked-matcher')).toBe(true);
+    expect(result.findings.some((f) => f.rule === 'conditional-assertion')).toBe(true);
+  });
+
   it('applies specific rules when given', () => {
     const a = write('a.test.ts', `it.skip('omitida', () => { expect(1).toBe(2); });`);
     expect(analyzeFiles([a], { rules: [] }).findings).toEqual([]);
