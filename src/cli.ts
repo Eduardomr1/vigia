@@ -15,8 +15,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { analyzeFiles, collectTestFiles } from './analyze';
-import { countBySeverity, renderReport } from './report';
+import { countBySeverity, renderJson, renderReport } from './report';
 import { renderSarif } from './sarif';
+import type { Finding } from './types';
+
+export type FailOnSeverity = 'P1' | 'P2' | 'P3';
 
 export interface Args {
   readonly files: string[];
@@ -24,12 +27,31 @@ export interface Args {
   readonly root: string;
   readonly sourceRoot?: string;
   readonly output?: string;
+  readonly failOn?: FailOnSeverity;
 }
 
 export interface CliRunResult {
   readonly exitCode: number;
   readonly outputText: string;
   readonly outputFile?: string;
+}
+
+export function resolveFailOn(raw?: string): FailOnSeverity {
+  const upper = raw?.trim().toUpperCase();
+  if (upper === 'P2') return 'P2';
+  if (upper === 'P3') return 'P3';
+  return 'P1';
+}
+
+export function shouldFail(findings: readonly Finding[], failOn: FailOnSeverity = 'P1'): boolean {
+  const counts = countBySeverity(findings);
+  if (failOn === 'P3') {
+    return counts.P1 > 0 || counts.P2 > 0 || counts.P3 > 0;
+  }
+  if (failOn === 'P2') {
+    return counts.P1 > 0 || counts.P2 > 0;
+  }
+  return counts.P1 > 0;
 }
 
 /**
@@ -43,6 +65,7 @@ export function parseArgs(argv: readonly string[]): Args {
   let root: string | undefined;
   let sourceRoot: string | undefined;
   let output: string | undefined;
+  let failOn: FailOnSeverity | undefined;
   let collectingFiles = false;
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -66,6 +89,22 @@ export function parseArgs(argv: readonly string[]): Args {
 
     if (arg.startsWith('--format=')) {
       format = arg.slice('--format='.length);
+      collectingFiles = false;
+      continue;
+    }
+
+    if (arg === '--fail-on') {
+      const next = argv[i + 1];
+      if (next !== undefined && !next.startsWith('-')) {
+        failOn = resolveFailOn(next);
+        i += 1;
+      }
+      collectingFiles = false;
+      continue;
+    }
+
+    if (arg.startsWith('--fail-on=')) {
+      failOn = resolveFailOn(arg.slice('--fail-on='.length));
       collectingFiles = false;
       continue;
     }
@@ -126,6 +165,7 @@ export function parseArgs(argv: readonly string[]): Args {
     root: root ?? '.',
     ...(sourceRoot ? { sourceRoot } : {}),
     ...(output ? { output } : {}),
+    ...(failOn ? { failOn } : {}),
   };
 }
 
@@ -133,7 +173,7 @@ export function runCli(
   argv: readonly string[] = process.argv.slice(2),
   options?: { writeStdout?: boolean },
 ): CliRunResult {
-  const { files, format, root, sourceRoot, output } = parseArgs(argv);
+  const { files, format, root, sourceRoot, output, failOn } = parseArgs(argv);
   const targets = files.length > 0 ? files : collectTestFiles(root);
   const result = analyzeFiles(targets, sourceRoot ? { sourceRoot } : {});
 
@@ -144,6 +184,8 @@ export function runCli(
     outputText = renderSarif(result);
   } else if (normalizedFormat === 'markdown') {
     outputText = `${renderReport(result)}\n`;
+  } else if (normalizedFormat === 'json') {
+    outputText = `${renderJson(result)}\n`;
   } else if (result.findings.length === 0) {
     outputText = `No findings in ${result.filesAnalyzed} file(s).\n`;
   } else {
@@ -166,9 +208,8 @@ export function runCli(
     process.stdout.write(outputText.endsWith('\n') ? outputText : `${outputText}\n`);
   }
 
-  // Only P1s break the build. A P3 just informs; making it blocking teaches
-  // people to ignore the tool.
-  const exitCode = countBySeverity(result.findings).P1 > 0 ? 1 : 0;
+  const failThreshold = failOn ?? 'P1';
+  const exitCode = shouldFail(result.findings, failThreshold) ? 1 : 0;
   return {
     exitCode,
     outputText,

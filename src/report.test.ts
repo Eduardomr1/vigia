@@ -1,4 +1,4 @@
-import { runCli } from './cli';
+import { parseArgs, resolveFailOn, runCli, shouldFail } from './cli';
 import { countBySeverity, renderExecutiveTable, renderJson, renderReport } from './report';
 import type { Finding } from './types';
 
@@ -146,10 +146,48 @@ describe('renderJson', () => {
   });
 });
 
-describe('CLI markdown formatting', () => {
+describe('CLI formatting and options', () => {
   it('outputs markdown comment with executive summary via --format markdown', () => {
     const result = runCli(['--files', 'src/report.test.ts', '--format', 'markdown'], { writeStdout: false });
     expect(result.outputText).toContain('## Vigía');
     expect(result.outputText).toContain('No findings in 1 test file.');
+  });
+
+  it('outputs structured JSON via --format json', () => {
+    const result = runCli(['--files', 'src/report.test.ts', '--format', 'json'], { writeStdout: false });
+    const parsed = JSON.parse(result.outputText);
+    expect(parsed.summary.filesAnalyzed).toBe(1);
+    expect(parsed.summary.totalFindings).toBe(0);
+    expect(Array.isArray(parsed.findings)).toBe(true);
+  });
+
+  it('parses --fail-on flags correctly', () => {
+    expect(parseArgs(['--fail-on', 'p2']).failOn).toBe('P2');
+    expect(parseArgs(['--fail-on=p3']).failOn).toBe('P3');
+    expect(parseArgs(['--fail-on', 'P1']).failOn).toBe('P1');
+    expect(parseArgs([]).failOn).toBeUndefined();
+    expect(resolveFailOn('p2')).toBe('P2');
+    expect(resolveFailOn('invalid')).toBe('P1');
+  });
+
+  it('evaluates exit threshold correctly with shouldFail', () => {
+    const p1Finding = finding({ severity: 'P1' });
+    const p2Finding = finding({ severity: 'P2' });
+    const p3Finding = finding({ severity: 'P3' });
+
+    // Under default P1 threshold
+    expect(shouldFail([], 'P1')).toBe(false);
+    expect(shouldFail([p3Finding], 'P1')).toBe(false);
+    expect(shouldFail([p2Finding], 'P1')).toBe(false);
+    expect(shouldFail([p1Finding], 'P1')).toBe(true);
+
+    // Under P2 threshold (fails on P1 or P2)
+    expect(shouldFail([p3Finding], 'P2')).toBe(false);
+    expect(shouldFail([p2Finding], 'P2')).toBe(true);
+    expect(shouldFail([p1Finding], 'P2')).toBe(true);
+
+    // Under P3 threshold (fails on any finding)
+    expect(shouldFail([p3Finding], 'P3')).toBe(true);
+    expect(shouldFail([], 'P3')).toBe(false);
   });
 });
