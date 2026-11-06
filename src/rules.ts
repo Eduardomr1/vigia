@@ -1851,4 +1851,6 @@ export const rules: readonly Rule[] = [
   vacuousAssertion,
   duplicateTestTitle,
   mockWithoutAssertion,
+  uninvokedMatcher,
+  conditionalAssertion,
 ];

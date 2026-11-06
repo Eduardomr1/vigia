@@ -1,10 +1,14 @@
 export { analyzeFiles, analyzeSource, collectTestFiles, isTestFile } from './analyze';
 export { applySuppressions, extractSuppressions } from './suppressions';
 export type { InlineSuppression } from './suppressions';
-export { countBySeverity, renderExecutiveTable, renderReport } from './report';
+export { countBySeverity, renderExecutiveTable, renderJson, renderReport } from './report';
+export type { JsonReport } from './report';
+export { parseArgs, resolveFailOn, runCli, shouldFail } from './cli';
+export type { Args, CliRunResult, FailOnSeverity } from './cli';
 export { renderSarif, validateSarifCompliance } from './sarif';
 export {
   assertionInCatch,
+  conditionalAssertion,
   duplicateTestTitle,
   expectWithoutMatcher,
   floatingTimerAssertion,
@@ -17,6 +21,7 @@ export {
   rules,
   skippedTest,
   tautology,
+  uninvokedMatcher,
   vacuousAssertion,
 } from './rules';
 export type { Rule, RuleContext } from './rules';

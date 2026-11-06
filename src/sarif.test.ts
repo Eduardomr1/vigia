@@ -487,6 +487,38 @@ describe('CLI --format sarif and output options (-o, --output)', () => {
       expect(parsed.runs[0]?.results[0]?.level).toBe('warning');
       expect(validateSarifCompliance(parsed).valid).toBe(true);
     });
+
+    it('properly serializes uninvoked-matcher and conditional-assertion into SARIF', () => {
+      const result: AnalysisResult = {
+        filesAnalyzed: 1,
+        findings: [
+          {
+            rule: 'uninvoked-matcher',
+            severity: 'P1',
+            file: 'src/matcher.test.ts',
+            line: 12,
+            column: 5,
+            message: 'Matcher ".toBeDefined" was referenced as a property without being invoked.',
+            hint: 'Invoke the matcher with parentheses.',
+          },
+          {
+            rule: 'conditional-assertion',
+            severity: 'P2',
+            file: 'src/conditional.test.ts',
+            line: 20,
+            column: 7,
+            message: 'Assertion is inside an if statement without an assertion plan.',
+            hint: 'Move outside conditional or declare expect.hasAssertions().',
+          },
+        ],
+      };
+      const parsed = JSON.parse(renderSarif(result)) as SarifLog;
+      const rules = parsed.runs[0]?.tool.driver.rules;
+      expect(rules).toHaveLength(2);
+      expect(rules?.find((r) => r.id === 'uninvoked-matcher')?.defaultConfiguration.level).toBe('error');
+      expect(rules?.find((r) => r.id === 'conditional-assertion')?.defaultConfiguration.level).toBe('warning');
+      expect(validateSarifCompliance(parsed).valid).toBe(true);
+    });
   });
 });
 
