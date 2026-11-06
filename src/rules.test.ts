@@ -1,6 +1,7 @@
 import { analyzeSource } from './analyze';
 import {
   assertionInCatch,
+  conditionalAssertion,
   duplicateTestTitle,
   expectWithoutMatcher,
   floatingTimerAssertion,
@@ -1948,6 +1949,137 @@ describe('duplicateTestTitle', () => {
              expect(item).to.exist;
            });`,
           [uninvokedMatcher],
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  describe('conditionalAssertion', () => {
+    it('detects expect inside an if statement', () => {
+      const result = findings(
+        `it('conditionally verifies', () => {
+           const items = getItems();
+           if (items.length > 0) {
+             expect(items[0]).toBe('first');
+           }
+         });`,
+        [conditionalAssertion],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('conditional-assertion');
+      expect(result[0]?.severity).toBe('P2');
+      expect(result[0]?.message).toContain('an if statement');
+      expect(result[0]?.hint).toContain('expect.hasAssertions()');
+    });
+
+    it('detects expect inside an else block', () => {
+      const result = findings(
+        `it('verifies in else branch', () => {
+           if (status === 'loading') {
+             doSomething();
+           } else {
+             expect(loaded).toBe(true);
+           }
+         });`,
+        [conditionalAssertion],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('conditional-assertion');
+      expect(result[0]?.message).toContain('an if statement');
+    });
+
+    it('detects expect inside a loop', () => {
+      const result = findings(
+        `it('verifies all elements in loop', () => {
+           for (const item of items) {
+             expect(item.valid).toBe(true);
+           }
+         });`,
+        [conditionalAssertion],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('conditional-assertion');
+      expect(result[0]?.message).toContain('a loop');
+    });
+
+    it('detects expect inside a while loop', () => {
+      const result = findings(
+        `it('verifies while conditions', () => {
+           while (cursor.hasNext()) {
+             expect(cursor.next()).toBeDefined();
+           }
+         });`,
+        [conditionalAssertion],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('conditional-assertion');
+      expect(result[0]?.message).toContain('a loop');
+    });
+
+    it('detects expect inside a switch statement', () => {
+      const result = findings(
+        `it('verifies via switch', () => {
+           switch (type) {
+             case 'admin':
+               expect(role).toBe('admin');
+               break;
+           }
+         });`,
+        [conditionalAssertion],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('conditional-assertion');
+      expect(result[0]?.message).toContain('a switch statement');
+    });
+
+    it('detects expect inside ternary conditional expression', () => {
+      const result = findings(
+        `it('verifies via ternary', () => {
+           isReady ? expect(val).toBe(1) : expect(val).toBe(0);
+         });`,
+        [conditionalAssertion],
+      );
+      expect(result).toHaveLength(2);
+      expect(result[0]?.rule).toBe('conditional-assertion');
+      expect(result[0]?.message).toContain('a conditional expression');
+    });
+
+    it('accepts conditional assertion when expect.hasAssertions() is declared', () => {
+      expect(
+        findings(
+          `it('guarded conditional assertion', () => {
+             expect.hasAssertions();
+             if (items.length > 0) {
+               expect(items[0]).toBe('ready');
+             }
+           });`,
+          [conditionalAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts conditional assertion when expect.assertions(N) is declared', () => {
+      expect(
+        findings(
+          `it('planned conditional assertion count', () => {
+             expect.assertions(1);
+             if (condition) {
+               expect(value).toBe(true);
+             }
+           });`,
+          [conditionalAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts unconditional top-level assertions', () => {
+      expect(
+        findings(
+          `it('verifies directly', () => {
+             const user = getUser();
+             expect(user.name).toBe('Eduardo');
+           });`,
+          [conditionalAssertion],
         ),
       ).toEqual([]);
     });

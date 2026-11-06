@@ -1740,6 +1740,103 @@ export const uninvokedMatcher: Rule = (context) => {
   return findings;
 };
 
+function isOuterAssertionCallNode(node: ts.CallExpression): boolean {
+  if (!isAssertionCallNode(node)) return false;
+  // If the parent is a PropertyAccessExpression whose expression is this call (e.g. expect(a).toBe),
+  // this call is an intermediate call, not the outer assertion call.
+  if (node.parent && ts.isPropertyAccessExpression(node.parent) && node.parent.expression === node) {
+    return false;
+  }
+  return true;
+}
+
+function hasAssertionPlanGuard(body: ts.Node): boolean {
+  let guarded = false;
+  walk(body, (n) => {
+    if (guarded || !ts.isCallExpression(n)) return;
+    if (ts.isPropertyAccessExpression(n.expression)) {
+      const obj = n.expression.expression;
+      const method = n.expression.name.text;
+      if (ts.isIdentifier(obj) && obj.text === 'expect') {
+        if (method === 'assertions' || method === 'hasAssertions') {
+          guarded = true;
+        }
+      }
+    }
+  });
+  return guarded;
+}
+
+function getEnclosingConditionalKind(node: ts.Node, rootBody: ts.Node): string | null {
+  let curr: ts.Node = node;
+  while (curr.parent && curr.parent !== rootBody) {
+    const parent: ts.Node = curr.parent;
+    if (ts.isIfStatement(parent)) {
+      if (parent.thenStatement === curr || parent.elseStatement === curr) {
+        return 'an if statement';
+      }
+    } else if (ts.isForStatement(parent) || ts.isForInStatement(parent) || ts.isForOfStatement(parent)) {
+      if (parent.statement === curr) {
+        return 'a loop';
+      }
+    } else if (ts.isWhileStatement(parent) || ts.isDoStatement(parent)) {
+      if (parent.statement === curr) {
+        return 'a loop';
+      }
+    } else if (ts.isSwitchStatement(parent)) {
+      if (parent.caseBlock === curr) {
+        return 'a switch statement';
+      }
+    } else if (ts.isConditionalExpression(parent)) {
+      if (parent.whenTrue === curr || parent.whenFalse === curr) {
+        return 'a conditional expression';
+      }
+    }
+    curr = parent;
+  }
+  return null;
+}
+
+/**
+ * Flags assertions placed inside conditional statements (if, switch, loops, ternary)
+ * without an explicit assertion plan guard (such as `expect.hasAssertions()`).
+ *
+ * If the condition evaluates to false or the collection is empty, the assertion
+ * never runs and the test passes green with false confidence.
+ */
+export const conditionalAssertion: Rule = (context) => {
+  const findings: Finding[] = [];
+
+  walk(context.source, (node) => {
+    if (!isTestCall(node)) return;
+    const body = bodyOf(node);
+    if (!body) return;
+
+    if (hasAssertionPlanGuard(body)) return;
+
+    walk(body, (inner) => {
+      if (!ts.isCallExpression(inner)) return;
+      if (!isOuterAssertionCallNode(inner)) return;
+
+      const condKind = getEnclosingConditionalKind(inner, body);
+      if (!condKind) return;
+
+      findings.push(
+        finding(
+          context,
+          inner,
+          'conditional-assertion',
+          'P2',
+          `Assertion is inside ${condKind} without an assertion plan (e.g. expect.hasAssertions()).`,
+          'Move the assertion outside the conditional, test each branch in a separate test, or declare expect.hasAssertions().',
+        ),
+      );
+    });
+  });
+
+  return findings;
+};
+
 export const rules: readonly Rule[] = [
   noAssertion,
   expectWithoutMatcher,
