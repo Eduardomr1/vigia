@@ -1612,6 +1612,134 @@ export const mockWithoutAssertion: Rule = (context) => {
   return findings;
 };
 
+const UNINVOKED_MATCHERS = new Set([
+  'toBe',
+  'toEqual',
+  'toStrictEqual',
+  'toBeTruthy',
+  'toBeFalsy',
+  'toBeDefined',
+  'toBeUndefined',
+  'toBeNull',
+  'toBeNaN',
+  'toBeInstanceOf',
+  'toBeGreaterThan',
+  'toBeGreaterThanOrEqual',
+  'toBeLessThan',
+  'toBeLessThanOrEqual',
+  'toBeCloseTo',
+  'toContain',
+  'toContainEqual',
+  'toHaveLength',
+  'toHaveProperty',
+  'toMatch',
+  'toMatchObject',
+  'toMatchSnapshot',
+  'toMatchInlineSnapshot',
+  'toThrow',
+  'toThrowError',
+  'toReturn',
+  'toHaveReturned',
+  'toReturnTimes',
+  'toHaveReturnedTimes',
+  'toReturnWith',
+  'toHaveReturnedWith',
+  'toHaveBeenLastCalledWith',
+  'toHaveBeenNthCalledWith',
+  'toHaveBeenCalled',
+  'toBeCalled',
+  'toHaveBeenCalledTimes',
+  'toBeCalledTimes',
+  'toHaveBeenCalledWith',
+  'toBeCalledWith',
+  'lastCalledWith',
+  'nthCalledWith',
+  'toBeVisible',
+  'toBeHidden',
+  'toBeEnabled',
+  'toBeDisabled',
+  'toBeChecked',
+  'toBeEditable',
+  'toBeEmpty',
+  'toBeFocused',
+  'toBeAttached',
+  'toBeInViewport',
+  'toContainText',
+  'toHaveText',
+  'toHaveValue',
+  'toHaveValues',
+  'toHaveAttribute',
+  'toHaveClass',
+  'toHaveCount',
+  'toHaveCSS',
+  'toHaveId',
+  'toHaveJSProperty',
+  'toHaveScreenshot',
+  'toHaveTitle',
+  'toHaveURL',
+  'toBeOK',
+  'toPass',
+]);
+
+function unwindsToExpect(expr: ts.Expression): boolean {
+  let current: ts.Expression = expr;
+  while (ts.isPropertyAccessExpression(current)) {
+    const name = current.name.text;
+    if (name !== 'not' && name !== 'resolves' && name !== 'rejects') {
+      return false;
+    }
+    current = current.expression;
+  }
+  if (ts.isCallExpression(current)) {
+    return calleeName(current.expression) === 'expect';
+  }
+  return false;
+}
+
+/**
+ * Flags matchers or modifiers referenced as a property without being invoked
+ * as a function call, e.g. `expect(x).toBeDefined;` or `expect(x).not.toBeNull;`.
+ *
+ * In Jest and Vitest, property access without parentheses is a no-op that silently passes.
+ */
+export const uninvokedMatcher: Rule = (context) => {
+  const findings: Finding[] = [];
+
+  walk(context.source, (node) => {
+    if (!ts.isPropertyAccessExpression(node)) return;
+
+    // If it's invoked as a function call (e.g. expect(x).toBeDefined()), it is valid.
+    if (node.parent && ts.isCallExpression(node.parent) && node.parent.expression === node) {
+      return;
+    }
+
+    // If this is an intermediate property access in a chain (e.g. `expect(x).not` in `expect(x).not.toBe(...)`),
+    // skip: only evaluate the terminal access.
+    if (node.parent && ts.isPropertyAccessExpression(node.parent) && node.parent.expression === node) {
+      return;
+    }
+
+    const propName = node.name.text;
+    const isMatcher = UNINVOKED_MATCHERS.has(propName);
+    const isModifier = propName === 'not' || propName === 'resolves' || propName === 'rejects';
+
+    if (!isMatcher && !isModifier) return;
+    if (!unwindsToExpect(node.expression)) return;
+
+    const message = isMatcher
+      ? `Matcher ".${propName}" was referenced as a property without being invoked.`
+      : `Matcher modifier ".${propName}" was referenced without a chained matcher.`;
+
+    const hint = isMatcher
+      ? `Invoke the matcher with parentheses: expect(...).${propName}().`
+      : `Chain a valid matcher after .${propName}, e.g. .${propName}.toBe(...).`;
+
+    findings.push(finding(context, node, 'uninvoked-matcher', 'P1', message, hint));
+  });
+
+  return findings;
+};
+
 export const rules: readonly Rule[] = [
   noAssertion,
   expectWithoutMatcher,

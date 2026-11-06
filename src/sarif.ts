@@ -72,6 +72,8 @@ const RULE_DESCRIPTIONS: Record<string, string> = {
   'vacuous-assertion': 'Assertion checks truthiness or existence on an expression guaranteed truthy by construction.',
   'duplicate-test-title': 'Multiple tests or suites share an identical title within the same lexical scope.',
   'mock-without-assertion': 'Test spy or mock function is created but never asserted with expect().',
+  'uninvoked-matcher': 'Assertion matcher or modifier was referenced as a property without being invoked.',
+  'conditional-assertion': 'Assertion is inside a conditional statement or loop without assertion count guard.',
   'unjustified-suppression': 'Inline suppression comment is missing required justification reason.',
   'unused-suppression': 'Inline suppression comment does not match any active finding on the target line.',
 };

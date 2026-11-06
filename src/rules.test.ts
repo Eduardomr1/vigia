@@ -12,6 +12,7 @@ import {
   redundantBooleanAssertion,
   skippedTest,
   tautology,
+  uninvokedMatcher,
   vacuousAssertion,
 } from './rules';
 
@@ -1845,6 +1846,108 @@ describe('duplicateTestTitle', () => {
              expect(buttonIsVisible()).toBe(true);
            });`,
           [mockWithoutAssertion],
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  describe('uninvokedMatcher', () => {
+    it('detects expect(x).toBeDefined referenced without parentheses', () => {
+      const result = findings(
+        `it('checks user exists', () => {
+           const user = getUser();
+           expect(user).toBeDefined;
+         });`,
+        [uninvokedMatcher],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('uninvoked-matcher');
+      expect(result[0]?.severity).toBe('P1');
+      expect(result[0]?.message).toContain('.toBeDefined');
+      expect(result[0]?.hint).toContain('expect(...).toBeDefined()');
+    });
+
+    it('detects expect(x).toBeTruthy without call', () => {
+      const result = findings(
+        `it('validates active state', () => {
+           expect(isActive).toBeTruthy;
+         });`,
+        [uninvokedMatcher],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('uninvoked-matcher');
+      expect(result[0]?.message).toContain('.toBeTruthy');
+    });
+
+    it('detects expect(x).not.toBeNull without call', () => {
+      const result = findings(
+        `it('checks not null', () => {
+           expect(result).not.toBeNull;
+         });`,
+        [uninvokedMatcher],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('uninvoked-matcher');
+      expect(result[0]?.message).toContain('.toBeNull');
+    });
+
+    it('detects expect(p).resolves.toBeDefined without call', () => {
+      const result = findings(
+        `it('checks async resolution', async () => {
+           await expect(fetchData()).resolves.toBeDefined;
+         });`,
+        [uninvokedMatcher],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('uninvoked-matcher');
+      expect(result[0]?.message).toContain('.toBeDefined');
+    });
+
+    it('detects dangling modifier expect(x).not', () => {
+      const result = findings(
+        `it('has dangling not', () => {
+           expect(value).not;
+         });`,
+        [uninvokedMatcher],
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('uninvoked-matcher');
+      expect(result[0]?.message).toContain('.not');
+    });
+
+    it('allows properly invoked matchers', () => {
+      expect(
+        findings(
+          `it('properly asserts', () => {
+             expect(user).toBeDefined();
+             expect(flag).toBeTruthy();
+             expect(result).not.toBeNull();
+           });`,
+          [uninvokedMatcher],
+        ),
+      ).toEqual([]);
+    });
+
+    it('ignores unrelated property access', () => {
+      expect(
+        findings(
+          `it('reads object property', () => {
+             const val = state.toBeDefined;
+             expect(val).toBe(true);
+           });`,
+          [uninvokedMatcher],
+        ),
+      ).toEqual([]);
+    });
+
+    it('does not confuse Chai assertions with uninvoked Jest matchers', () => {
+      expect(
+        findings(
+          `it('uses Chai property assertions', () => {
+             expect(status).to.be.true;
+             expect(item).to.exist;
+           });`,
+          [uninvokedMatcher],
         ),
       ).toEqual([]);
     });
