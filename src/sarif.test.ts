@@ -216,6 +216,7 @@ describe('renderSarif - OASIS SARIF v2.1.0 compliance', () => {
     expect(compliance.valid).toBe(true);
     expect(compliance.errors).toEqual([]);
 
+    expect.hasAssertions();
     for (const rule of parsed.runs[0]?.tool.driver.rules ?? []) {
       expect(rule.id).toBeTruthy();
       expect(rule.name).toBeTruthy();
@@ -288,6 +289,7 @@ describe('renderSarif - OASIS SARIF v2.1.0 compliance', () => {
 
     const driverRules = parsed.runs[0]?.tool.driver.rules ?? [];
     expect(driverRules).toHaveLength(3);
+    expect.hasAssertions();
     for (const rule of driverRules) {
       expect(rule.shortDescription.text).not.toContain('Test quality rule:');
     }

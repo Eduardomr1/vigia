@@ -41,12 +41,13 @@ Real output from `node dist/cli.js ejemplo` against the fixture in this repo —
 
 ## What it detects
 
-Thirteen AST-powered checks, all built on the same idea: a test that can't fail is worse than no test, because it occupies the place of one that would.
+Fifteen AST-powered checks, all built on the same idea: a test that can't fail is worse than no test, because it occupies the place of one that would.
 
 | Rule | Severity | Example |
 |---|---|---|
 | **No assertion** | P1 | A test body that never calls an assertion |
 | **`expect()` without a matcher** | P1 | `expect(result)` with no `.toBe(...)` chained after it |
+| **Uninvoked matcher** | P1 | `expect(user).toBeDefined;` without invoking `()` — passes silently as a property access |
 | **Tautology** | P1 | `expect(true).toBe(true)`, comparing a literal to itself |
 | **Identical expression** | P1 | `expect(user.id).toBe(user.id)`, comparing an expression to itself |
 | **Floating timer assertion** | P1 | `setTimeout(() => { expect(...); })` without awaiting or fake timer advance |
@@ -54,13 +55,14 @@ Thirteen AST-powered checks, all built on the same idea: a test that can't fail 
 | **Missing `await`** | P1 | `expect(promise).rejects.toThrow()` with no `await` — the test ends before the promise settles |
 | **Assertion in `catch`** | P1 | `try { await op(); } catch (e) { expect(e)... }` without a failure guard in `try` — passes silently if `op()` never throws |
 | **Focused test (`.only`)** | P1 | `it.only(...)` silently skips the rest of the suite in CI |
+| **Conditional assertion** | P2 | `if (ready) expect(user).toBe(...)` without `expect.hasAssertions()` guard — passes if condition is false |
 | **Duplicate test title** | P2 | Multiple tests sharing identical title in the same describe scope |
 | **Mock without assertion** | P2 | `jest.spyOn()` or `vi.spyOn()` created in test but never verified with `expect()` |
 | **Redundant boolean assertion** | P2 | `expect(a === b).toBe(true)` — hides diffs; should be `expect(a).toBe(b)` |
 | **Skipped test** | P3 | `it.skip` / `xit` left behind past its reason for existing |
 | **Orphan negative assertion** | P1 / P2 | `queryByTestId('x')` expected to be null/absent, but `"x"` never appears anywhere in the source — the assertion can't fail because the thing it denies doesn't exist |
 
-The first twelve run on any Jest or Vitest test file, with native support for Cypress (`.should()`, `.and()`), Chai (`assert.*`) and Playwright's async locator matchers (`toBeVisible`, `toHaveText`, etc.). The orphan negative check needs `--src` pointed at your source root, and also reads Maestro YAML flows for the same defect in E2E specs.
+The first fourteen run on any Jest or Vitest test file, with native support for Cypress (`.should()`, `.and()`), Chai (`assert.*`) and Playwright's async locator matchers (`toBeVisible`, `toHaveText`, etc.). The orphan negative check needs `--src` pointed at your source root, and also reads Maestro YAML flows for the same defect in E2E specs.
 
 ### Inline Suppressions
 
@@ -257,6 +259,9 @@ You can also run it as a CLI, outside of CI:
 ```bash
 npx vigia src/**/*.test.ts --src src --format markdown
 npx vigia src --format sarif -o results.sarif
+npx vigia src --format json -o vigia-report.json
+npx vigia src --fail-on p2
+```
 
 ---
 
@@ -272,10 +277,10 @@ Written in TypeScript. Vigía never executes your tests — it only reads them, 
 
 ## Vigía tests itself
 
-The tool that polices assertions isn't exempt from them: **129 tests across 4 suites**, every rule covered by both a positive and a negative fixture, and a dedicated `self-check` CI job that runs Vigía against its own `src/` on every push.
+The tool that polices assertions isn't exempt from them: **over 315 tests across 6 suites**, every rule covered by both a positive and a negative fixture, and a dedicated `self-check` CI job that runs Vigía against its own `src/` on every push.
 
 ```bash
-npm test              # 129 tests
+npm test              # >315 tests
 node dist/cli.js src  # Vigía, on Vigía
 ```
 
