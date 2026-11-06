@@ -1,5 +1,5 @@
 import { runCli } from './cli';
-import { countBySeverity, renderExecutiveTable, renderReport } from './report';
+import { countBySeverity, renderExecutiveTable, renderJson, renderReport } from './report';
 import type { Finding } from './types';
 
 function finding(overrides: Partial<Finding> = {}): Finding {
@@ -100,6 +100,49 @@ describe('countBySeverity', () => {
 
   it('returns zeros with no findings', () => {
     expect(countBySeverity([])).toEqual({ P1: 0, P2: 0, P3: 0 });
+  });
+});
+
+describe('renderJson', () => {
+  it('formats clean JSON structure for empty findings', () => {
+    const jsonStr = renderJson({ findings: [], filesAnalyzed: 3 });
+    const parsed = JSON.parse(jsonStr);
+
+    expect(parsed).toEqual({
+      summary: {
+        filesAnalyzed: 3,
+        totalFindings: 0,
+        p1: 0,
+        p2: 0,
+        p3: 0,
+      },
+      findings: [],
+    });
+  });
+
+  it('formats JSON structure with findings and severity totals', () => {
+    const f1 = finding({ rule: 'uninvoked-matcher', severity: 'P1', line: 12, column: 5 });
+    const f2 = finding({ rule: 'conditional-assertion', severity: 'P2', line: 25, column: 9 });
+    const jsonStr = renderJson({ findings: [f1, f2], filesAnalyzed: 2 });
+    const parsed = JSON.parse(jsonStr);
+
+    expect(parsed.summary).toEqual({
+      filesAnalyzed: 2,
+      totalFindings: 2,
+      p1: 1,
+      p2: 1,
+      p3: 0,
+    });
+    expect(parsed.findings).toHaveLength(2);
+    expect(parsed.findings[0]).toEqual({
+      rule: 'uninvoked-matcher',
+      severity: 'P1',
+      file: 'src/a.test.ts',
+      line: 12,
+      column: 5,
+      message: 'Test "x" contains no assertion.',
+      hint: 'Add an expect.',
+    });
   });
 });
 

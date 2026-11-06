@@ -73,6 +73,48 @@ export function renderReport(result: AnalysisResult): string {
   return lines.join('\n');
 }
 
+export interface JsonReport {
+  readonly summary: {
+    readonly filesAnalyzed: number;
+    readonly totalFindings: number;
+    readonly p1: number;
+    readonly p2: number;
+    readonly p3: number;
+  };
+  readonly findings: readonly {
+    readonly rule: string;
+    readonly severity: Severity;
+    readonly file: string;
+    readonly line: number;
+    readonly column: number;
+    readonly message: string;
+    readonly hint: string;
+  }[];
+}
+
+export function renderJson(result: AnalysisResult): string {
+  const counts = countBySeverity(result.findings);
+  const payload: JsonReport = {
+    summary: {
+      filesAnalyzed: result.filesAnalyzed,
+      totalFindings: result.findings.length,
+      p1: counts.P1,
+      p2: counts.P2,
+      p3: counts.P3,
+    },
+    findings: result.findings.map((f) => ({
+      rule: f.rule,
+      severity: f.severity,
+      file: f.file,
+      line: f.line,
+      column: f.column,
+      message: f.message,
+      hint: f.hint,
+    })),
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
 export function countBySeverity(findings: readonly Finding[]): Record<Severity, number> {
   const counts: Record<Severity, number> = { P1: 0, P2: 0, P3: 0 };
   for (const f of findings) counts[f.severity] += 1;
