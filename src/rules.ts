@@ -1837,6 +1837,88 @@ export const conditionalAssertion: Rule = (context) => {
   return findings;
 };
 
+/**
+ * Flags .toBe() or Chai .equal() assertions called on object or array literals.
+ *
+ * In JavaScript, fresh object/array literals ({}, []) are allocated with unique
+ * memory references. Thus:
+ * - `expect(val).toBe({})` or `expect(val).toBe([])` will ALWAYS fail (impossible equality).
+ * - `expect(val).not.toBe({})` or `expect(val).not.toBe([])` is a tautology that ALWAYS passes.
+ *
+ * Tests should use `.toEqual()` or `.toStrictEqual()` for value equality.
+ */
+export const referenceEqualityOnLiteral: Rule = (context) => {
+  const findings: Finding[] = [];
+
+  walk(context.source, (node) => {
+    if (!ts.isCallExpression(node)) return;
+    if (node.arguments.length === 0) return;
+
+    const arg = node.arguments[0];
+    if (!arg || (!ts.isObjectLiteralExpression(arg) && !ts.isArrayLiteralExpression(arg))) {
+      return;
+    }
+
+    const callee = node.expression;
+    if (!ts.isPropertyAccessExpression(callee)) return;
+
+    const methodName = callee.name.text;
+    const isReferenceCheck = methodName === 'toBe' || methodName === 'equal';
+    if (!isReferenceCheck) return;
+
+    // Verify it unwinds to expect(...)
+    let current: ts.Expression = callee.expression;
+    let hasNot = false;
+    let validExpectChain = false;
+
+    while (ts.isPropertyAccessExpression(current)) {
+      const name = current.name.text;
+      if (name === 'not') {
+        hasNot = true;
+      } else if (name === 'to') {
+        // Chai support: expect(x).to.equal({...})
+      } else if (name !== 'resolves' && name !== 'rejects') {
+        break;
+      }
+      current = current.expression;
+    }
+
+    if (ts.isCallExpression(current) && calleeName(current.expression) === 'expect') {
+      validExpectChain = true;
+    }
+
+    if (!validExpectChain) return;
+
+    const kindDesc = ts.isObjectLiteralExpression(arg) ? 'an object literal' : 'an array literal';
+
+    if (hasNot) {
+      findings.push(
+        finding(
+          context,
+          node,
+          'reference-equality-on-literal',
+          'P1',
+          `Tautological reference check: .not.${methodName}() called with ${kindDesc} always passes because fresh literals never share references.`,
+          `Use .not.toEqual() or .not.toStrictEqual() for deep structural comparison.`,
+        ),
+      );
+    } else {
+      findings.push(
+        finding(
+          context,
+          node,
+          'reference-equality-on-literal',
+          'P1',
+          `Impossible reference check: .${methodName}() called with ${kindDesc} checks memory identity instead of deep equality.`,
+          `Use .toEqual() or .toStrictEqual() instead of .${methodName}() for structural object or array comparison.`,
+        ),
+      );
+    }
+  });
+
+  return findings;
+};
+
 export const rules: readonly Rule[] = [
   noAssertion,
   expectWithoutMatcher,
@@ -1853,4 +1935,5 @@ export const rules: readonly Rule[] = [
   mockWithoutAssertion,
   uninvokedMatcher,
   conditionalAssertion,
+  referenceEqualityOnLiteral,
 ];
