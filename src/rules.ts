@@ -1919,6 +1919,97 @@ export const referenceEqualityOnLiteral: Rule = (context) => {
   return findings;
 };
 
+/**
+ * Flags promise chains with assertions (.then() or .catch()) in synchronous tests
+ * that are not returned or awaited.
+ *
+ * In a non-async test without a `done` callback, when a promise chain is unreturned,
+ * the test runner finishes synchronously and marks the test as PASSING before the
+ * promise resolves. Any assertion failures inside the promise are unhandled or missed.
+ */
+export const unreturnedPromiseAssertion: Rule = (context) => {
+  const findings: Finding[] = [];
+
+  walk(context.source, (node) => {
+    if (!isTestCall(node)) return;
+
+    // Find the test function argument
+    let callback: ts.ArrowFunction | ts.FunctionExpression | null = null;
+    for (const arg of node.arguments) {
+      if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
+        callback = arg;
+        break;
+      }
+    }
+
+    if (!callback) return;
+
+    // If marked async, promises are handled in an async context
+    const isAsync = callback.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
+    if (isAsync) return;
+
+    // If it has a done callback parameter (e.g. it('...', (done) => ...)), runner waits for done()
+    if (callback.parameters.length > 0) return;
+
+    // If the body is an expression body (e.g. () => promise.then(...)), it is implicitly returned
+    if (!ts.isBlock(callback.body)) return;
+
+    const blockBody = callback.body;
+
+    walk(blockBody, (inner) => {
+      if (!ts.isCallExpression(inner)) return;
+
+      // Must be a call to .then(...) or .catch(...)
+      if (!ts.isPropertyAccessExpression(inner.expression)) return;
+      const propName = inner.expression.name.text;
+      if (propName !== 'then' && propName !== 'catch') return;
+
+      // Must contain an assertion inside this .then/.catch call
+      if (!containsAssertion(inner)) return;
+
+      // Check if this promise call (or an outer chain wrapping it) is returned
+      let curr: ts.Node = inner;
+      let isReturned = false;
+
+      while (curr.parent && curr.parent !== blockBody) {
+        if (ts.isReturnStatement(curr.parent)) {
+          isReturned = true;
+          break;
+        }
+        curr = curr.parent;
+      }
+
+      if (curr.parent && ts.isReturnStatement(curr.parent)) {
+        isReturned = true;
+      }
+
+      if (!isReturned) {
+        // Avoid double-reporting if an outer .catch() wraps an inner .then()
+        if (
+          inner.parent &&
+          ts.isPropertyAccessExpression(inner.parent) &&
+          (inner.parent.name.text === 'then' || inner.parent.name.text === 'catch')
+        ) {
+          return;
+        }
+
+        findings.push(
+          finding(
+            context,
+            inner,
+            'unreturned-promise-assertion',
+            'P1',
+            `Promise chain with assertions in synchronous test "${titleOf(node)}" is not returned. The test will finish before assertions run.`,
+            'Make the test function async and await the promise, or return the promise from the test.',
+          ),
+        );
+      }
+    });
+  });
+
+  return findings;
+};
+
 export const rules: readonly Rule[] = [
   noAssertion,
   expectWithoutMatcher,
@@ -1936,4 +2027,5 @@ export const rules: readonly Rule[] = [
   uninvokedMatcher,
   conditionalAssertion,
   referenceEqualityOnLiteral,
+  unreturnedPromiseAssertion,
 ];
