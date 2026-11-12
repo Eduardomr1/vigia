@@ -41,13 +41,15 @@ Real output from `node dist/cli.js ejemplo` against the fixture in this repo —
 
 ## What it detects
 
-Fifteen AST-powered checks, all built on the same idea: a test that can't fail is worse than no test, because it occupies the place of one that would.
+Seventeen AST-powered checks, all built on the same idea: a test that can't fail is worse than no test, because it occupies the place of one that would.
 
 | Rule | Severity | Example |
 |---|---|---|
 | **No assertion** | P1 | A test body that never calls an assertion |
 | **`expect()` without a matcher** | P1 | `expect(result)` with no `.toBe(...)` chained after it |
 | **Uninvoked matcher** | P1 | `expect(user).toBeDefined;` without invoking `()` — passes silently as a property access |
+| **Reference equality on literal** | P1 | `expect(res).toBe({})` or `expect(items).toBe([])` checking memory identity instead of deep equality |
+| **Unreturned promise assertion** | P1 | `fetch().then(r => { expect(r)... })` unreturned in synchronous test — completes before promise runs |
 | **Tautology** | P1 | `expect(true).toBe(true)`, comparing a literal to itself |
 | **Identical expression** | P1 | `expect(user.id).toBe(user.id)`, comparing an expression to itself |
 | **Floating timer assertion** | P1 | `setTimeout(() => { expect(...); })` without awaiting or fake timer advance |
@@ -62,7 +64,7 @@ Fifteen AST-powered checks, all built on the same idea: a test that can't fail i
 | **Skipped test** | P3 | `it.skip` / `xit` left behind past its reason for existing |
 | **Orphan negative assertion** | P1 / P2 | `queryByTestId('x')` expected to be null/absent, but `"x"` never appears anywhere in the source — the assertion can't fail because the thing it denies doesn't exist |
 
-The first fourteen run on any Jest or Vitest test file, with native support for Cypress (`.should()`, `.and()`), Chai (`assert.*`) and Playwright's async locator matchers (`toBeVisible`, `toHaveText`, etc.). The orphan negative check needs `--src` pointed at your source root, and also reads Maestro YAML flows for the same defect in E2E specs.
+The first sixteen run on any Jest or Vitest test file, with native support for Cypress (`.should()`, `.and()`), Chai (`assert.*`) and Playwright's async locator matchers (`toBeVisible`, `toHaveText`, etc.). The orphan negative check needs `--src` pointed at your source root, and also reads Maestro YAML flows for the same defect in E2E specs.
 
 ### Inline Suppressions
 
