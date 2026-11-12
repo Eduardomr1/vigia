@@ -74,6 +74,8 @@ const RULE_DESCRIPTIONS: Record<string, string> = {
   'mock-without-assertion': 'Test spy or mock function is created but never asserted with expect().',
   'uninvoked-matcher': 'Assertion matcher or modifier was referenced as a property without being invoked.',
   'conditional-assertion': 'Assertion is inside a conditional statement or loop without assertion count guard.',
+  'reference-equality-on-literal': 'Assertion checks referential equality (.toBe) on an object or array literal.',
+  'unreturned-promise-assertion': 'Promise chain containing assertions in a synchronous test is not returned or awaited.',
   'unjustified-suppression': 'Inline suppression comment is missing required justification reason.',
   'unused-suppression': 'Inline suppression comment does not match any active finding on the target line.',
 };
@@ -82,7 +84,7 @@ const RULE_DESCRIPTIONS: Record<string, string> = {
  * Transforms Vigía analysis findings into the OASIS SARIF v2.1.0 standard,
  * enabling seamless integration with GitHub Code Scanning alerts.
  */
-export function renderSarif(result: AnalysisResult, toolVersion = '1.7.0'): string {
+export function renderSarif(result: AnalysisResult, toolVersion = '1.8.0'): string {
   const rulesMap = new Map<string, SarifRule>();
 
   for (const f of result.findings) {
