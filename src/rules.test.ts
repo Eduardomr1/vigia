@@ -11,9 +11,11 @@ import {
   mockWithoutAssertion,
   noAssertion,
   redundantBooleanAssertion,
+  referenceEqualityOnLiteral,
   skippedTest,
   tautology,
   uninvokedMatcher,
+  unreturnedPromiseAssertion,
   vacuousAssertion,
 } from './rules';
 
@@ -2080,6 +2082,146 @@ describe('duplicateTestTitle', () => {
              expect(user.name).toBe('Eduardo');
            });`,
           [conditionalAssertion],
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  describe('referenceEqualityOnLiteral', () => {
+    it('flags expect(x).toBe({}) with an object literal', () => {
+      const result = findings(
+        `it('compares object reference', () => {
+           expect(result).toBe({ status: 'ok' });
+         });`,
+        [referenceEqualityOnLiteral],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('reference-equality-on-literal');
+      expect(result[0]?.severity).toBe('P1');
+      expect(result[0]?.message).toContain('Impossible reference check');
+      expect(result[0]?.hint).toContain('.toEqual()');
+    });
+
+    it('flags expect(x).toBe([]) with an array literal', () => {
+      const result = findings(
+        `it('compares array reference', () => {
+           expect(items).toBe([1, 2]);
+         });`,
+        [referenceEqualityOnLiteral],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('reference-equality-on-literal');
+      expect(result[0]?.message).toContain('an array literal');
+    });
+
+    it('flags tautological expect(x).not.toBe({})', () => {
+      const result = findings(
+        `it('tautological negative check', () => {
+           expect(config).not.toBe({ active: true });
+         });`,
+        [referenceEqualityOnLiteral],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('reference-equality-on-literal');
+      expect(result[0]?.message).toContain('Tautological reference check');
+    });
+
+    it('accepts .toEqual() and .toStrictEqual() with literals', () => {
+      expect(
+        findings(
+          `it('valid deep equality', () => {
+             expect(result).toEqual({ status: 'ok' });
+             expect(items).toStrictEqual([1, 2]);
+           });`,
+          [referenceEqualityOnLiteral],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts .toBe() with primitive literals or reference identifiers', () => {
+      expect(
+        findings(
+          `it('valid primitive or variable check', () => {
+             expect(count).toBe(42);
+             expect(name).toBe('Alice');
+             expect(instance).toBe(expectedInstance);
+           });`,
+          [referenceEqualityOnLiteral],
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  describe('unreturnedPromiseAssertion', () => {
+    it('flags unreturned promise chain with assertions in synchronous test', () => {
+      const result = findings(
+        `it('unreturned promise test', () => {
+           fetchData().then((data) => {
+             expect(data.value).toBe(100);
+           });
+         });`,
+        [unreturnedPromiseAssertion],
+      );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.rule).toBe('unreturned-promise-assertion');
+      expect(result[0]?.severity).toBe('P1');
+      expect(result[0]?.message).toContain('unreturned promise test');
+      expect(result[0]?.hint).toContain('async');
+    });
+
+    it('accepts returned promise in synchronous test', () => {
+      expect(
+        findings(
+          `it('returned promise test', () => {
+             return fetchData().then((data) => {
+               expect(data.value).toBe(100);
+             });
+           });`,
+          [unreturnedPromiseAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts concise arrow body with implicit return', () => {
+      expect(
+        findings(
+          `it('implicit return', () =>
+             fetchData().then((data) => {
+               expect(data.value).toBe(100);
+             })
+           );`,
+          [unreturnedPromiseAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts async test functions', () => {
+      expect(
+        findings(
+          `it('async test', async () => {
+             await fetchData().then((data) => {
+               expect(data.value).toBe(100);
+             });
+           });`,
+          [unreturnedPromiseAssertion],
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts test with done callback parameter', () => {
+      expect(
+        findings(
+          `it('callback test', (done) => {
+             fetchData().then((data) => {
+               expect(data.value).toBe(100);
+               done();
+             });
+           });`,
+          [unreturnedPromiseAssertion],
         ),
       ).toEqual([]);
     });
