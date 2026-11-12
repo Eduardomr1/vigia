@@ -18,10 +18,12 @@ export {
   mockWithoutAssertion,
   noAssertion,
   redundantBooleanAssertion,
+  referenceEqualityOnLiteral,
   rules,
   skippedTest,
   tautology,
   uninvokedMatcher,
+  unreturnedPromiseAssertion,
   vacuousAssertion,
 } from './rules';
 export type { Rule, RuleContext } from './rules';
